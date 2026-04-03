@@ -235,20 +235,29 @@ def fetch_devenv_data():
     )
     if data is None:
         return None, None
-    # 响应字段名待确认：devEnvironments / instances / devEnvs
-    items = data.get("devEnvironments") or data.get("instances") or data.get("devEnvs") or []
-    return aggregate(
+    print(f"[devenv] 响应顶层字段: {list(data.keys())}")
+    # 尝试所有可能的列表字段名
+    items = (data.get("devEnvironments")
+             or data.get("instances")
+             or data.get("devEnvs")
+             or data.get("devEnvList")
+             or data.get("list")
+             or [])
+    print(f"[devenv] 获取到 {len(items)} 条记录（过滤前）")
+    result = aggregate(
         items,
-        user_field="creator",         # 开发环境用 creator 字段标识用户
-        gpu_field="npuNum",           # 字符串 "4" → 自动转 int
+        user_field="creator",
+        gpu_field="npuNum",
         name_field="name",
         spec_field="flavor",
         status_field="status",
         status_value="RUNNING",
         region_field="region",
         region_value=REGION,
-        duration_field="createTime",  # 毫秒时间戳 → 自动计算已运行小时数
+        duration_field="createTime",
     )
+    print(f"[devenv] 过滤后 leader 数: {len(result[0]) if result[0] else 0}")
+    return result
 
 
 # ── 训练作业 ──────────────────────────────────────────────

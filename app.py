@@ -14,17 +14,20 @@ from flask import Flask, render_template, jsonify
 app = Flask(__name__)
 
 # ── 鉴权配置 ──────────────────────────────────────────────
-APPID = "com.noah.pangu.rl"
-TOKEN = "xxxx"
-BASE_URL = "https://roma.huawei.com/csb/rest/saas/ei/eiWizard"
-COMMON_PARAMS = {
-    "appid": APPID,
-    "vendor": "HEC",
-    "region": "cn-southwest-2",
-}
+ENDPOINT      = "https://roma.huawei.com"   # 替换为实际 Endpoint
+APPID         = "com.noah.pangu.rl"
+API_VERSION   = "v1"                        # demanager 接口 version 参数
+VENDOR        = "HEC"
+REGION        = "cn-southwest-2"
+AUTHORIZATION = "xxxx"                      # Authorization header 值
+X_HW_ID       = "xxxx"                      # X-HW-ID header 值
+X_HW_APPKEY   = "xxxx"                      # X-HW-APPKEY header 值
+
 HEADERS = {
-    "content-type": "application/json;charset=UTF-8",
-    "csb-token": TOKEN,
+    "content-Type":  "application/json",
+    "Authorization": AUTHORIZATION,
+    "X-HW-ID":       X_HW_ID,
+    "X-HW-APPKEY":   X_HW_APPKEY,
 }
 
 # ── 缓存配置 ──────────────────────────────────────────────
@@ -162,31 +165,81 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
 
 
 # ── API 请求基础函数 ──────────────────────────────────────
-def _get(url, extra_params, filter_dict):
-    params = {**COMMON_PARAMS, **extra_params}
-    encoded = base64.b64encode(json.dumps(filter_dict, ensure_ascii=False).encode()).decode()
-    params["params"] = encoded
+def _b64(obj):
+    """将 dict 序列化后 base64 编码，供 params 字段使用。"""
+    return base64.b64encode(json.dumps(obj, ensure_ascii=False).encode()).decode()
+
+
+def _get(url, params, timeout=15):
     try:
-        r = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
         if r.status_code == 200:
             return r.json()
-        print(f"[HTTP {r.status_code}] {url}")
+        print(f"[GET {r.status_code}] {url}")
     except Exception as e:
-        print(f"请求异常 {url}: {e}")
+        print(f"GET 请求异常 {url}: {e}")
         traceback.print_exc()
     return None
 
 
+def _post(url, params, body, timeout=15):
+    try:
+        r = requests.post(url, params=params, json=body, headers=HEADERS, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        print(f"[POST {r.status_code}] {url}")
+    except Exception as e:
+        print(f"POST 请求异常 {url}: {e}")
+        traceback.print_exc()
+    return None
+
+
+# ── 开发环境 ──────────────────────────────────────────────
+def fetch_devenv_data():
+    """POST /csb/roma-aistudio/demanager/list"""
+    print("获取开发环境数据...")
+    data = _post(
+        f"{ENDPOINT}/csb/roma-aistudio/demanager/list",
+        params={"appid": APPID, "version": API_VERSION},
+        body={
+            "vendor":   VENDOR,
+            "region":   REGION,
+            "deType":   "",     # 不过滤类型，返回全部
+            "pageNum":  1,
+            "pageSize": 500,
+        },
+    )
+    if data is None:
+        return None, None
+    # 响应字段名待确认：devEnvironments / instances / devEnvs
+    items = data.get("devEnvironments") or data.get("instances") or data.get("devEnvs") or []
+    return aggregate(
+        items,
+        gpu_field="workingNpuNum",   # 确认：workingNpuNum / npuNum / workingGpuNum
+        name_field="name",
+        spec_field="flavor",          # 确认：flavor / specName
+        status_field="status",
+        status_value="RUNNING",
+        duration_field="duration",    # 确认：duration / runningTime；无则置 None
+    )
+
+
 # ── 训练作业 ──────────────────────────────────────────────
 def fetch_train_data():
+    """GET /csb/roma-aistudio/train/job/list"""
     print("获取训练作业数据...")
     data = _get(
-        f"{BASE_URL}/train/job/list",
-        {"trainApiVersion": "V2"},
-        {
-            "pageSize": "500", "pageIndex": "0", "status": "8",
-            "searchName": "", "filterParam": [{"key": "", "value": ""}],
-            "tagIds": [""],
+        f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
+        params={
+            "appid":            APPID,
+            "trainApiVersion":  "V2",
+            "jobType":          "",
+            "region":           REGION,
+            "params": _b64({
+                "pageSize":  "500",
+                "pageIndex": "0",
+                "status":    "8",
+            }),
         },
     )
     if data is None:
@@ -202,52 +255,58 @@ def fetch_train_data():
     )
 
 
-# ── 开发环境（Notebook）────────────────────────────────────
-# TODO: 确认实际接口路径和返回字段后按需调整
-def fetch_devenv_data():
-    print("获取开发环境数据...")
-    data = _get(
-        f"{BASE_URL}/notebook/list",
-        {},
-        {
-            "pageSize": "500", "pageIndex": "0",
-            "status": "RUNNING",          # 运行中
-            "searchName": "",
+# ── 推理服务（v1 + v2 合并）────────────────────────────────
+def _fetch_inference_v1():
+    """GET /csb/roma-aistudio/infer/real-time/service/list"""
+    return _get(
+        f"{ENDPOINT}/csb/roma-aistudio/infer/real-time/service/list",
+        params={
+            "appid":     APPID,
+            "infertype": "real-time",
+            "params": _b64({
+                "pageSize":    500,
+                "pageIndex":   1,
+                "filterParam": [{"key": "name", "value": ""}],
+            }),
         },
     )
-    if data is None:
-        return None, None
-    return aggregate(
-        data.get("instances", []),        # TODO: 确认列表字段名
-        gpu_field="workingGpuNum",
-        name_field="name",
-        spec_field="flavor",              # TODO: 确认规格字段名
-        status_field="status",
-        status_value="RUNNING",
-        duration_field="duration",
+
+
+def _fetch_inference_v2():
+    """GET /csb/roma-aistudio/infer/real-time/service/v2/list"""
+    return _get(
+        f"{ENDPOINT}/csb/roma-aistudio/infer/real-time/service/v2/list",
+        params={
+            "appid":     APPID,
+            "infertype": "real-time",
+            "vendor":    VENDOR,
+            "params": _b64({
+                "pageSize":    500,
+                "pageIndex":   1,
+                "filterParam": [{"key": "name", "value": ""}],
+            }),
+        },
     )
 
 
-# ── 推理服务 ──────────────────────────────────────────────
-# TODO: 确认实际接口路径和返回字段后按需调整
 def fetch_inference_data():
+    """合并 v1 + v2 推理服务数据"""
     print("获取推理服务数据...")
-    data = _get(
-        f"{BASE_URL}/inference/service/list",
-        {},
-        {
-            "pageSize": "500", "pageIndex": "0",
-            "status": "running",
-            "searchName": "",
-        },
-    )
-    if data is None:
+    items = []
+    for fn in (_fetch_inference_v1, _fetch_inference_v2):
+        data = fn()
+        if data:
+            # 响应字段名待确认：services / modelServiceList / serviceList
+            items.extend(
+                data.get("services") or data.get("modelServiceList") or data.get("serviceList") or []
+            )
+    if not items:
         return None, None
     return aggregate(
-        data.get("services", []),          # TODO: 确认列表字段名
-        gpu_field="gpuNum",                # TODO: 确认 GPU 字段名
+        items,
+        gpu_field="gpuNum",           # 确认：gpuNum / workingGpuNum / npuNum
         name_field="name",
-        spec_field="specName",
+        spec_field="specName",        # 确认：specName / flavor
         status_field="status",
         status_value="running",
         duration_field="duration",

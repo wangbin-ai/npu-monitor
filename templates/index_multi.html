@@ -18,9 +18,9 @@
   --text:    #e2e8f0;
   --text2:   #8892a4;
   --radius:  10px;
-  --fs-base: 15px;
-  --fs-sm:   13px;
-  --fs-xs:   12px;
+  --fs-base: 17px;
+  --fs-sm:   15px;
+  --fs-xs:   14px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: 'PingFang SC','Microsoft YaHei',sans-serif; font-size: var(--fs-base); }
@@ -31,52 +31,61 @@ header {
   padding: 16px 28px; background: var(--bg2);
   border-bottom: 1px solid var(--border);
 }
-header h1 { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+header h1 { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
 header h1 span { color: var(--accent); }
 .update-info { font-size: var(--fs-sm); color: var(--text2); }
 .update-info b { color: var(--green); }
 .refresh-btn {
-  cursor: pointer; padding: 7px 20px; border-radius: 6px;
+  cursor: pointer; padding: 8px 22px; border-radius: 6px;
   background: var(--accent); color: #fff; border: none;
   font-size: var(--fs-sm); transition: opacity .2s;
 }
 .refresh-btn:hover { opacity: .82; }
 
-/* ── Main layout ── */
-.main-grid {
+/* ── Top section: left cards + right charts ── */
+.top-section {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 1fr 420px;
   gap: 16px;
   padding: 16px 28px 0;
   align-items: start;
 }
 
-/* ── Left: summary cards ── */
-.cards-col { display: flex; flex-direction: column; gap: 12px; }
+/* ── Left: 3 cards in a row, then total card full-width ── */
+.cards-area { display: flex; flex-direction: column; gap: 12px; }
+.cards-row  { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
 .card {
   background: var(--bg2); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 18px 20px;
 }
 .card .label { font-size: var(--fs-sm); color: var(--text2); margin-bottom: 6px; }
-.card .value { font-size: 34px; font-weight: 700; line-height: 1.1; }
+.card .value { font-size: 36px; font-weight: 700; line-height: 1.1; }
 .card .sub   { font-size: var(--fs-xs); color: var(--text2); margin-top: 5px; }
+.c-blue   { border-left: 3px solid var(--accent);  }
 .c-blue   .value { color: var(--accent);  }
-.c-blue   { border-left: 3px solid var(--accent); }
-.c-green  .value { color: var(--green); }
-.c-green  { border-left: 3px solid var(--green); }
-.c-orange .value { color: var(--orange); }
-.c-orange { border-left: 3px solid var(--orange); }
-.c-red    .value { color: var(--red); }
-.c-red    { border-left: 3px solid var(--red); }
+.c-green  { border-left: 3px solid var(--green);   }
+.c-green  .value { color: var(--green);   }
+.c-orange { border-left: 3px solid var(--orange);  }
+.c-orange .value { color: var(--orange);  }
+.c-red    { border-left: 3px solid var(--red);     }
+.c-red    .value { color: var(--red);     }
 
-/* ── Right: charts ── */
+/* total card spans full width of left area */
+.card-total { display: flex; align-items: center; gap: 32px; padding: 16px 24px; }
+.card-total .value { font-size: 42px; }
+.card-total .meta  { flex: 1; display: flex; gap: 32px; }
+.card-total .meta-item .meta-label { font-size: var(--fs-xs); color: var(--text2); }
+.card-total .meta-item .meta-val   { font-size: var(--fs-sm); font-weight: 600; margin-top: 2px; }
+
+/* ── Right: 2 charts stacked ── */
 .charts-col { display: flex; flex-direction: column; gap: 12px; }
 .chart-box {
   background: var(--bg2); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 16px 18px;
 }
 .chart-box h3 { font-size: var(--fs-sm); color: var(--text2); margin-bottom: 10px; }
-.chart-box .echart { width: 100%; height: 200px; }
+.chart-box .echart { width: 100%; height: 210px; }
 
 /* ── Panels row ── */
 .panels {
@@ -89,21 +98,21 @@ header h1 span { color: var(--accent); }
 }
 .panel-header {
   display: flex; align-items: center; gap: 10px;
-  padding: 13px 16px; background: var(--bg3);
+  padding: 14px 16px; background: var(--bg3);
   border-bottom: 1px solid var(--border); cursor: pointer;
   user-select: none;
 }
 .panel-header .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .panel-header h2 { font-size: var(--fs-base); font-weight: 600; flex: 1; }
 .panel-header .badge {
-  padding: 2px 10px; border-radius: 20px; font-size: var(--fs-xs);
+  padding: 3px 11px; border-radius: 20px; font-size: var(--fs-xs);
   background: rgba(255,255,255,.07);
 }
 
 /* ── Tree table ── */
 .tree-table { width: 100%; border-collapse: collapse; }
 .tree-table th, .tree-table td {
-  padding: 8px 11px; text-align: left;
+  padding: 9px 12px; text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -118,14 +127,14 @@ header h1 span { color: var(--accent); }
 
 .row-member { background: rgba(255,255,255,.02); cursor: pointer; }
 .row-member:hover { background: rgba(255,255,255,.05); }
-.row-member td:first-child { padding-left: 24px; }
+.row-member td:first-child { padding-left: 26px; }
 .row-member .toggle { margin-right: 6px; display: inline-block; transition: transform .2s; }
 .row-member.open .toggle { transform: rotate(90deg); }
 
 .row-task { display: none; }
 .row-task.visible { display: table-row; }
 .row-task td { color: var(--text2); }
-.row-task td:first-child { padding-left: 42px; }
+.row-task td:first-child { padding-left: 44px; }
 
 .member-group { display: none; }
 .member-group.visible { display: contents; }
@@ -134,12 +143,12 @@ header h1 span { color: var(--accent); }
   display: inline-block; height: 6px; border-radius: 3px;
   background: var(--accent); vertical-align: middle; margin-right: 6px;
 }
-.empty-tip { text-align: center; color: var(--text2); padding: 24px; font-size: var(--fs-sm); }
+.empty-tip { text-align: center; color: var(--text2); padding: 26px; font-size: var(--fs-sm); }
 
 #loading {
   position: fixed; inset: 0; background: rgba(0,0,0,.55);
   display: none; align-items: center; justify-content: center;
-  font-size: 17px; z-index: 99;
+  font-size: 18px; z-index: 99;
 }
 </style>
 </head>
@@ -153,34 +162,50 @@ header h1 span { color: var(--accent); }
   <button class="refresh-btn" onclick="loadData(true)">刷新</button>
 </header>
 
-<!-- Top section: cards (left) + charts (right) -->
-<div class="main-grid">
+<div class="top-section">
 
-  <!-- Left: 4 summary cards -->
-  <div class="cards-col">
-    <div class="card c-blue">
-      <div class="label">开发环境 NPU</div>
-      <div class="value" id="sum-devenv">—</div>
-      <div class="sub" id="sum-devenv-tasks">— 个实例</div>
+  <!-- Left: 3 category cards + 1 total card -->
+  <div class="cards-area">
+    <div class="cards-row">
+      <div class="card c-blue">
+        <div class="label">开发环境 NPU</div>
+        <div class="value" id="sum-devenv">—</div>
+        <div class="sub" id="sum-devenv-tasks">— 个实例</div>
+      </div>
+      <div class="card c-green">
+        <div class="label">训练作业 NPU</div>
+        <div class="value" id="sum-train">—</div>
+        <div class="sub" id="sum-train-tasks">— 个任务</div>
+      </div>
+      <div class="card c-orange">
+        <div class="label">推理服务 NPU</div>
+        <div class="value" id="sum-inference">—</div>
+        <div class="sub" id="sum-inference-tasks">— 个服务</div>
+      </div>
     </div>
-    <div class="card c-green">
-      <div class="label">训练作业 NPU</div>
-      <div class="value" id="sum-train">—</div>
-      <div class="sub" id="sum-train-tasks">— 个任务</div>
-    </div>
-    <div class="card c-orange">
-      <div class="label">推理服务 NPU</div>
-      <div class="value" id="sum-inference">—</div>
-      <div class="sub" id="sum-inference-tasks">— 个服务</div>
-    </div>
-    <div class="card c-red">
-      <div class="label">NPU 合计</div>
-      <div class="value" id="sum-total">—</div>
-      <div class="sub">全部资源占用</div>
+    <div class="card c-red card-total">
+      <div>
+        <div class="label">NPU 合计</div>
+        <div class="value" id="sum-total">—</div>
+      </div>
+      <div class="meta">
+        <div class="meta-item">
+          <div class="meta-label">开发环境实例</div>
+          <div class="meta-val" id="meta-devenv-tasks">—</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">训练任务</div>
+          <div class="meta-val" id="meta-train-tasks">—</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">推理服务</div>
+          <div class="meta-val" id="meta-inference-tasks">—</div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- Right: 2 charts -->
+  <!-- Right: 2 charts stacked -->
   <div class="charts-col">
     <div class="chart-box">
       <h3>各资源池 NPU 占用（训练）</h3>
@@ -194,7 +219,7 @@ header h1 span { color: var(--accent); }
 
 </div>
 
-<!-- Bottom section: three panels -->
+<!-- Three detail panels -->
 <div class="panels">
 
   <div class="panel">
@@ -255,34 +280,34 @@ const COLORS = ['#4f8ef7','#36d9b0','#f7a94f','#f75f5f','#a78bfa','#34d399','#fb
 let _charts = {};
 
 function makeBarChart(elId, names, values, color) {
-  if (_charts[elId]) { _charts[elId].dispose(); }
+  if (_charts[elId]) _charts[elId].dispose();
   const c = echarts.init(document.getElementById(elId), 'dark');
   _charts[elId] = c;
   c.setOption({
     backgroundColor: 'transparent',
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 12, right: 16, top: 8, bottom: 4, containLabel: true },
-    xAxis: { type: 'value', splitLine: { lineStyle: { color: '#2e3347' } }, axisLabel: { fontSize: 12 } },
-    yAxis: { type: 'category', data: names, axisLabel: { fontSize: 12 } },
+    xAxis: { type: 'value', splitLine: { lineStyle: { color: '#2e3347' } }, axisLabel: { fontSize: 13 } },
+    yAxis: { type: 'category', data: names, axisLabel: { fontSize: 13 } },
     series: [{ type: 'bar', data: values, itemStyle: { color }, barMaxWidth: 20 }],
   });
   window.addEventListener('resize', () => c.resize());
 }
 
 function makePieChart(elId, seriesData) {
-  if (_charts[elId]) { _charts[elId].dispose(); }
+  if (_charts[elId]) _charts[elId].dispose();
   const c = echarts.init(document.getElementById(elId), 'dark');
   _charts[elId] = c;
   c.setOption({
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item', formatter: '{b}: {c} NPU ({d}%)' },
-    legend: { orient: 'vertical', right: 4, top: 'center', textStyle: { fontSize: 12 } },
+    legend: { orient: 'vertical', right: 4, top: 'center', textStyle: { fontSize: 13 } },
     color: COLORS,
     series: [{
       type: 'pie', radius: ['38%', '66%'], center: ['36%', '50%'],
       data: seriesData,
       label: { show: false },
-      emphasis: { label: { show: true, fontSize: 13 } },
+      emphasis: { label: { show: true, fontSize: 14 } },
     }],
   });
   window.addEventListener('resize', () => c.resize());
@@ -303,9 +328,9 @@ function renderTable(type, userData) {
 
   let html = '';
   sorted.forEach(([leader, ld], li) => {
-    totalGpu  += ld.gpu_num;
+    totalGpu   += ld.gpu_num;
     totalTasks += ld.task_count;
-    const barW = Math.round(ld.gpu_num / _maxGpu[type] * 72);
+    const barW  = Math.round(ld.gpu_num / _maxGpu[type] * 72);
     html += `
 <tr class="row-leader" onclick="toggleLeader(this,'lg-${type}-${li}')">
   <td><span class="toggle">▶</span>${leader}</td>
@@ -321,16 +346,13 @@ function renderTable(type, userData) {
       html += `
 <tr class="row-member" onclick="toggleMember(this,'mg-${type}-${li}-${mi}')">
   <td><span class="toggle">▶</span>${member}</td>
-  <td>${md.gpu_num}</td>
-  <td>${md.max_duration}h</td>
-  <td>${md.task_count}个</td>
+  <td>${md.gpu_num}</td><td>${md.max_duration}h</td><td>${md.task_count}个</td>
 </tr>`;
       md.tasks.forEach((t, ti) => {
         html += `
 <tr class="row-task" id="mg-${type}-${li}-${mi}-${ti}">
   <td title="${t.task_name}">${t.task_name}</td>
-  <td>${t.gpu_num}</td>
-  <td>${t.duration}h</td>
+  <td>${t.gpu_num}</td><td>${t.duration}h</td>
   <td title="${t.spec_name}">${t.spec_name}</td>
 </tr>`;
       });
@@ -373,16 +395,17 @@ function loadData(force) {
         const { totalGpu, totalTasks } = renderTable(type, section.user_data || {});
         grandTotal += totalGpu;
 
-        document.getElementById(`sum-${type}`).textContent   = totalGpu;
+        document.getElementById(`sum-${type}`).textContent       = totalGpu;
         document.getElementById(`sum-${type}-tasks`).textContent = `${totalTasks} 个${labels[type]}`;
-        document.getElementById(`badge-${type}`).textContent = `${totalGpu} NPU · ${totalTasks} 个`;
+        document.getElementById(`badge-${type}`).textContent     = `${totalGpu} NPU · ${totalTasks} 个`;
+        const metaEl = document.getElementById(`meta-${type}-tasks`);
+        if (metaEl) metaEl.textContent = totalTasks + ' 个';
       });
 
       document.getElementById('sum-total').textContent = grandTotal;
 
-      // Charts (based on training data)
-      const trainSpec  = (data.train || {}).spec_data  || {};
-      const trainUsers = (data.train || {}).user_data  || {};
+      const trainSpec  = (data.train || {}).spec_data || {};
+      const trainUsers = (data.train || {}).user_data || {};
 
       const specEntries   = Object.entries(trainSpec).sort((a,b)=>b[1]-a[1]).slice(0,12);
       const leaderEntries = Object.entries(trainUsers)

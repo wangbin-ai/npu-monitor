@@ -14,17 +14,20 @@ from flask import Flask, render_template, jsonify
 app = Flask(__name__)
 
 # ── 鉴权配置 ──────────────────────────────────────────────
-APPID = "com.noah.pangu.rl"
-TOKEN = "xxxx"
-BASE_URL = "https://roma.huawei.com/csb/rest/saas/ei/eiWizard"
-COMMON_PARAMS = {
-    "appid": APPID,
-    "vendor": "HEC",
-    "region": "cn-southwest-2",
-}
+ENDPOINT      = "https://roma.huawei.com"   # 替换为实际 Endpoint
+APPID         = "com.noah.pangu.rl"
+API_VERSION   = "v1"                        # demanager 接口 version 参数
+VENDOR        = "HEC"
+REGION        = "cn-southwest-2"
+AUTHORIZATION = "xxxx"                      # Authorization header 值
+X_HW_ID       = "xxxx"                      # X-HW-ID header 值
+X_HW_APPKEY   = "xxxx"                      # X-HW-APPKEY header 值
+
 HEADERS = {
-    "content-type": "application/json;charset=UTF-8",
-    "csb-token": TOKEN,
+    "content-Type":  "application/json",
+    "Authorization": AUTHORIZATION,
+    "X-HW-ID":       X_HW_ID,
+    "X-HW-APPKEY":   X_HW_APPKEY,
 }
 
 # ── 缓存配置 ──────────────────────────────────────────────
@@ -84,32 +87,50 @@ def resolve_user(user_id):
 
 # ── 通用：按 leader→member→tasks 汇总 ────────────────────
 def aggregate(items, *, gpu_field, name_field, spec_field,
+              user_field="userId",
               status_field=None, status_value=None,
+              region_field=None, region_value=None,
               duration_field=None, extra_fields=None):
     """
     通用汇总函数，适配训练作业、开发环境、推理服务。
 
-    extra_fields: list of (src_key, dst_key) 额外字段映射
+    user_field:     记录用户 ID 的字段名，默认 "userId"
+    region_field/region_value: 可选的 region 过滤
+    duration_field: 值可为 "HH:MM:SS" 字符串，或毫秒时间戳（createTime）
+    extra_fields:   list of (src_key, dst_key) 额外字段映射
     """
     leader_data = {}
     spec_gpu = {}
     extra_fields = extra_fields or []
 
+    now_ms = time.time() * 1000
+
     for item in items:
-        # 状态过滤（可选）
+        # 状态过滤
         if status_field and status_value:
             if item.get(status_field) != status_value:
                 continue
+        # region 过滤
+        if region_field and region_value:
+            if item.get(region_field) != region_value:
+                continue
 
-        user_id = item.get("userId") or ""
+        user_id = item.get(user_field) or ""
         spec_name = item.get(spec_field) or "未知规格"
-        gpu_num = item.get(gpu_field) or 0
+        gpu_num = int(float(item.get(gpu_field) or 0))  # 兼容 "4" / "8.0"
         item_name = item.get(name_field) or ""
 
         duration = 0
         if duration_field:
-            dur_str = item.get(duration_field, "0:0:0") or "0:0:0"
-            duration = int(dur_str.split(':')[0]) if ':' in dur_str else 0
+            raw = item.get(duration_field)
+            if raw:
+                raw_str = str(raw)
+                if ':' in raw_str:
+                    # "HH:MM:SS" 格式
+                    duration = int(raw_str.split(':')[0])
+                elif raw_str.isdigit() and int(raw_str) > 1_000_000_000_000:
+                    # 毫秒时间戳（createTime）→ 计算已运行小时数
+                    duration = int((now_ms - int(raw_str)) / 3_600_000)
 
         user_name, leader_name = resolve_user(user_id)
 
@@ -162,31 +183,84 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
 
 
 # ── API 请求基础函数 ──────────────────────────────────────
-def _get(url, extra_params, filter_dict):
-    params = {**COMMON_PARAMS, **extra_params}
-    encoded = base64.b64encode(json.dumps(filter_dict, ensure_ascii=False).encode()).decode()
-    params["params"] = encoded
+def _b64(obj):
+    """将 dict 序列化后 base64 编码，供 params 字段使用。"""
+    return base64.b64encode(json.dumps(obj, ensure_ascii=False).encode()).decode()
+
+
+def _get(url, params, timeout=15):
     try:
-        r = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
         if r.status_code == 200:
             return r.json()
-        print(f"[HTTP {r.status_code}] {url}")
+        print(f"[GET {r.status_code}] {url}")
     except Exception as e:
-        print(f"请求异常 {url}: {e}")
+        print(f"GET 请求异常 {url}: {e}")
         traceback.print_exc()
     return None
 
 
+def _post(url, params, body, timeout=15):
+    try:
+        r = requests.post(url, params=params, json=body, headers=HEADERS, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        print(f"[POST {r.status_code}] {url}")
+    except Exception as e:
+        print(f"POST 请求异常 {url}: {e}")
+        traceback.print_exc()
+    return None
+
+
+# ── 开发环境 ──────────────────────────────────────────────
+def fetch_devenv_data():
+    """POST /csb/roma-aistudio/demanager/list"""
+    print("获取开发环境数据...")
+    data = _post(
+        f"{ENDPOINT}/csb/roma-aistudio/demanager/list",
+        params={"appid": APPID, "version": API_VERSION},
+        body={
+            "vendor":   VENDOR,
+            "region":   REGION,
+            "deType":   "",     # 不过滤类型，返回全部
+            "pageNum":  1,
+            "pageSize": 500,
+        },
+    )
+    if data is None:
+        return None, None
+    # 响应字段名待确认：devEnvironments / instances / devEnvs
+    items = data.get("devEnvironments") or data.get("instances") or data.get("devEnvs") or []
+    return aggregate(
+        items,
+        user_field="creator",         # 开发环境用 creator 字段标识用户
+        gpu_field="npuNum",           # 字符串 "4" → 自动转 int
+        name_field="name",
+        spec_field="flavor",
+        status_field="status",
+        status_value="RUNNING",
+        region_field="region",
+        region_value=REGION,
+        duration_field="createTime",  # 毫秒时间戳 → 自动计算已运行小时数
+    )
+
+
 # ── 训练作业 ──────────────────────────────────────────────
 def fetch_train_data():
+    """GET /csb/roma-aistudio/train/job/list"""
     print("获取训练作业数据...")
     data = _get(
-        f"{BASE_URL}/train/job/list",
-        {"trainApiVersion": "V2"},
-        {
-            "pageSize": "500", "pageIndex": "0", "status": "8",
-            "searchName": "", "filterParam": [{"key": "", "value": ""}],
-            "tagIds": [""],
+        f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
+        params={
+            "appid":            APPID,
+            "trainApiVersion":  "V2",
+            "jobType":          "",
+            "region":           REGION,
+            "params": _b64({
+                "pageSize":  "500",
+                "pageIndex": "0",
+                "status":    "8",
+            }),
         },
     )
     if data is None:
@@ -202,57 +276,124 @@ def fetch_train_data():
     )
 
 
-# ── 开发环境（Notebook）────────────────────────────────────
-# TODO: 确认实际接口路径和返回字段后按需调整
-def fetch_devenv_data():
-    print("获取开发环境数据...")
-    data = _get(
-        f"{BASE_URL}/notebook/list",
-        {},
-        {
-            "pageSize": "500", "pageIndex": "0",
-            "status": "RUNNING",          # 运行中
-            "searchName": "",
+# ── 推理服务（v1 + v2 合并）────────────────────────────────
+def _fetch_inference_v1():
+    """GET /csb/roma-aistudio/infer/real-time/service/list"""
+    return _get(
+        f"{ENDPOINT}/csb/roma-aistudio/infer/real-time/service/list",
+        params={
+            "appid":     APPID,
+            "infertype": "real-time",
+            "params": _b64({
+                "pageSize":    500,
+                "pageIndex":   1,
+                "filterParam": [{"key": "name", "value": ""}],
+            }),
         },
     )
-    if data is None:
-        return None, None
-    return aggregate(
-        data.get("instances", []),        # TODO: 确认列表字段名
-        gpu_field="workingGpuNum",
-        name_field="name",
-        spec_field="flavor",              # TODO: 确认规格字段名
-        status_field="status",
-        status_value="RUNNING",
-        duration_field="duration",
+
+
+def _fetch_inference_v2():
+    """GET /csb/roma-aistudio/infer/real-time/service/v2/list"""
+    return _get(
+        f"{ENDPOINT}/csb/roma-aistudio/infer/real-time/service/v2/list",
+        params={
+            "appid":     APPID,
+            "infertype": "real-time",
+            "vendor":    VENDOR,
+            "params": _b64({
+                "pageSize":    500,
+                "pageIndex":   1,
+                "filterParam": [{"key": "name", "value": ""}],
+            }),
+        },
     )
 
 
-# ── 推理服务 ──────────────────────────────────────────────
-# TODO: 确认实际接口路径和返回字段后按需调整
+def _merge_aggregations(a, b):
+    """将两次 aggregate() 结果 (leader_data, spec_gpu) 合并为一份。"""
+    if not a[0]:
+        return b
+    if not b[0]:
+        return a
+    ld_a, sp_a = a
+    ld_b, sp_b = b
+    merged_ld = {k: v for k, v in ld_a.items()}
+    for leader, ld in ld_b.items():
+        if leader not in merged_ld:
+            merged_ld[leader] = ld
+        else:
+            merged_ld[leader]['gpu_num']        += ld['gpu_num']
+            merged_ld[leader]['task_count']     += ld['task_count']
+            merged_ld[leader]['total_duration'] += ld['total_duration']
+            merged_ld[leader]['max_duration']    = max(
+                merged_ld[leader]['max_duration'], ld['max_duration'])
+            for member, md in ld['members'].items():
+                if member not in merged_ld[leader]['members']:
+                    merged_ld[leader]['members'][member] = md
+                else:
+                    m = merged_ld[leader]['members'][member]
+                    m['gpu_num']        += md['gpu_num']
+                    m['task_count']     += md['task_count']
+                    m['total_duration'] += md['total_duration']
+                    m['max_duration']    = max(m['max_duration'], md['max_duration'])
+                    m['tasks'].extend(md['tasks'])
+    merged_sp = {k: v for k, v in sp_a.items()}
+    for k, v in sp_b.items():
+        merged_sp[k] = merged_sp.get(k, 0) + v
+    return merged_ld, merged_sp
+
+
 def fetch_inference_data():
+    """分别处理 v1 / v2 推理服务（字段不同），再合并结果"""
     print("获取推理服务数据...")
-    data = _get(
-        f"{BASE_URL}/inference/service/list",
-        {},
-        {
-            "pageSize": "500", "pageIndex": "0",
-            "status": "running",
-            "searchName": "",
-        },
-    )
-    if data is None:
+
+    # ── v1 ─────────────────────────────────────────────────
+    result_v1 = (None, None)
+    data_v1 = _fetch_inference_v1()
+    if data_v1:
+        items_v1 = (data_v1.get("services")
+                    or data_v1.get("modelServiceList")
+                    or data_v1.get("serviceList") or [])
+        if items_v1:
+            result_v1 = aggregate(
+                items_v1,
+                user_field="creator",
+                gpu_field="xpuNum",
+                name_field="name",
+                spec_field="inferType",
+                status_field="status",
+                status_value="running",
+                region_field="region",
+                region_value=REGION,
+                duration_field="publishTime",
+            )
+
+    # ── v2 ─────────────────────────────────────────────────
+    result_v2 = (None, None)
+    data_v2 = _fetch_inference_v2()
+    if data_v2:
+        items_v2 = (data_v2.get("services")
+                    or data_v2.get("modelServiceList")
+                    or data_v2.get("serviceList") or [])
+        if items_v2:
+            result_v2 = aggregate(
+                items_v2,
+                user_field="creator",
+                gpu_field="xpuNum",
+                name_field="name",
+                spec_field="inferType",
+                status_field="status",
+                status_value="running",
+                region_field="region",
+                region_value=REGION,
+                duration_field="publishTime",
+            )
+
+    merged = _merge_aggregations(result_v1, result_v2)
+    if not merged[0]:
         return None, None
-    return aggregate(
-        data.get("services", []),          # TODO: 确认列表字段名
-        gpu_field="gpuNum",                # TODO: 确认 GPU 字段名
-        name_field="name",
-        spec_field="specName",
-        status_field="status",
-        status_value="running",
-        duration_field="duration",
-        extra_fields=[("instanceCount", "instance_count")],
-    )
+    return merged
 
 
 # ── 缓存刷新 ──────────────────────────────────────────────

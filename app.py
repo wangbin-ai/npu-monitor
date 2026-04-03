@@ -2,9 +2,9 @@ import json
 import base64
 import re
 import time
-import pprint
 import traceback
 import threading
+from pathlib import Path
 
 import requests
 import pandas as pd
@@ -42,7 +42,13 @@ _cache = {
 }
 
 # ── 花名册解析 ────────────────────────────────────────────
-df = pd.read_excel('算法卡池先导用卡分配.xlsx', sheet_name='能力项用卡名单')
+_BASE_DIR = Path(__file__).parent
+_EXCEL_PATH = _BASE_DIR / '算法卡池先导用卡分配.xlsx'
+try:
+    df = pd.read_excel(_EXCEL_PATH, sheet_name='能力项用卡名单')
+    print(f"花名册加载成功：{_EXCEL_PATH}，共 {len(df)} 行")
+except FileNotFoundError:
+    raise SystemExit(f"[ERROR] 找不到花名册文件：{_EXCEL_PATH}")
 capability_columns = df.columns[1:-2].tolist()
 
 usr_dict = {}       # key → leader
@@ -452,4 +458,9 @@ def get_data():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5063, debug=False)
+    import socket
+    PORT = 5063
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(('127.0.0.1', PORT)) == 0:
+            raise SystemExit(f"[ERROR] 端口 {PORT} 已被占用，请先停止旧进程（lsof -i :{PORT}）")
+    app.run(host='0.0.0.0', port=PORT, debug=False)

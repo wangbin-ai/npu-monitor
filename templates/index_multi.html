@@ -42,10 +42,10 @@ header h1 span { color: var(--accent); }
 }
 .refresh-btn:hover { opacity: .82; }
 
-/* ── Top section: left 4 cards vertical + right 2 charts horizontal ── */
+/* ── Top section: 3 equal columns ── */
 .top-section {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   padding: 16px 28px 0;
   align-items: start;
@@ -70,14 +70,12 @@ header h1 span { color: var(--accent); }
 .c-red    { border-left: 3px solid var(--red);     }
 .c-red    .value { color: var(--red);     }
 
-/* ── Right: 2 charts side by side ── */
-.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .chart-box {
   background: var(--bg2); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 16px 18px;
 }
 .chart-box h3 { font-size: var(--fs-sm); color: var(--text2); margin-bottom: 10px; }
-.chart-box .echart { width: 100%; height: 280px; }
+.chart-box .echart { width: 100%; height: 340px; }
 
 /* ── Panels row ── */
 .panels {
@@ -180,16 +178,16 @@ header h1 span { color: var(--accent); }
     </div>
   </div>
 
-  <!-- Right: 2 charts side by side -->
-  <div class="charts-row">
-    <div class="chart-box">
-      <h3>各资源池 NPU 占用（训练）</h3>
-      <div class="echart" id="chart-spec-train"></div>
-    </div>
-    <div class="chart-box">
-      <h3>各小组 NPU 占用汇总（开发+训练+推理）</h3>
-      <div class="echart" id="chart-leader-all"></div>
-    </div>
+  <!-- Middle: team totals bar chart -->
+  <div class="chart-box">
+    <h3>各小组 NPU 占用汇总（开发+训练+推理）</h3>
+    <div class="echart" id="chart-leader-all"></div>
+  </div>
+
+  <!-- Right: resource pool grouped bar chart -->
+  <div class="chart-box">
+    <h3>各资源池 NPU 占用（开发 / 训练 / 推理）</h3>
+    <div class="echart" id="chart-spec-all"></div>
   </div>
 
 </div>
@@ -265,6 +263,26 @@ function makeBarChart(elId, names, values, color) {
     xAxis: { type: 'value', splitLine: { lineStyle: { color: '#2e3347' } }, axisLabel: { fontSize: 13 } },
     yAxis: { type: 'category', data: names, axisLabel: { fontSize: 13 } },
     series: [{ type: 'bar', data: values, itemStyle: { color }, barMaxWidth: 20 }],
+  });
+  window.addEventListener('resize', () => c.resize());
+}
+
+function makeGroupedBarChart(elId, specs, seriesArr) {
+  // seriesArr: [{name, color, data}]
+  if (_charts[elId]) _charts[elId].dispose();
+  const c = echarts.init(document.getElementById(elId), 'dark');
+  _charts[elId] = c;
+  c.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { top: 0, right: 0, textStyle: { fontSize: 13 }, itemWidth: 12, itemHeight: 12 },
+    grid: { left: 12, right: 16, top: 28, bottom: 4, containLabel: true },
+    xAxis: { type: 'value', splitLine: { lineStyle: { color: '#2e3347' } }, axisLabel: { fontSize: 13 } },
+    yAxis: { type: 'category', data: specs, axisLabel: { fontSize: 12 } },
+    series: seriesArr.map(s => ({
+      name: s.name, type: 'bar', data: s.data,
+      itemStyle: { color: s.color }, barMaxWidth: 14,
+    })),
   });
   window.addEventListener('resize', () => c.resize());
 }
@@ -361,22 +379,35 @@ function loadData(force) {
 
       document.getElementById('sum-total').textContent = grandTotal;
 
-      const trainSpec = (data.train || {}).spec_data || {};
-      const specEntries = Object.entries(trainSpec).sort((a,b)=>b[1]-a[1]).slice(0,12);
-      makeBarChart('chart-spec-train',
-        specEntries.map(e=>e[0]), specEntries.map(e=>e[1]), '#4f8ef7');
-
-      // 各小组汇总：开发环境 + 训练作业 + 推理服务
+      // 各小组汇总柱状图（开发+训练+推理）
       const leaderTotals = {};
       ['devenv', 'train', 'inference'].forEach(type => {
-        const ud = (data[type] || {}).user_data || {};
-        Object.entries(ud).forEach(([leader, ld]) => {
+        Object.entries((data[type] || {}).user_data || {}).forEach(([leader, ld]) => {
           leaderTotals[leader] = (leaderTotals[leader] || 0) + ld.gpu_num;
         });
       });
       const leaderEntries = Object.entries(leaderTotals).sort((a,b)=>b[1]-a[1]).slice(0,15);
       makeBarChart('chart-leader-all',
         leaderEntries.map(e=>e[0]), leaderEntries.map(e=>e[1]), '#36d9b0');
+
+      // 各资源池分组柱状图（开发 / 训练 / 推理 分别显示）
+      const specMap = { devenv: {}, train: {}, inference: {} };
+      const allSpecs = new Set();
+      ['devenv', 'train', 'inference'].forEach(type => {
+        Object.entries((data[type] || {}).spec_data || {}).forEach(([spec, val]) => {
+          specMap[type][spec] = val;
+          allSpecs.add(spec);
+        });
+      });
+      // 按三类合计排序，取前 12
+      const sortedSpecs = [...allSpecs]
+        .map(s => [s, (specMap.devenv[s]||0) + (specMap.train[s]||0) + (specMap.inference[s]||0)])
+        .sort((a,b) => b[1]-a[1]).slice(0,12).map(e=>e[0]);
+      makeGroupedBarChart('chart-spec-all', sortedSpecs, [
+        { name: '开发环境', color: '#4f8ef7', data: sortedSpecs.map(s => specMap.devenv[s]    || 0) },
+        { name: '训练作业', color: '#36d9b0', data: sortedSpecs.map(s => specMap.train[s]     || 0) },
+        { name: '推理服务', color: '#f7a94f', data: sortedSpecs.map(s => specMap.inference[s] || 0) },
+      ]);
     })
     .catch(err => {
       console.error(err);

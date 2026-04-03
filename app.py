@@ -117,7 +117,7 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
 
         user_id = item.get(user_field) or ""
         spec_name = item.get(spec_field) or "未知规格"
-        gpu_num = int(item.get(gpu_field) or 0)   # 兼容字符串 "4"
+        gpu_num = int(float(item.get(gpu_field) or 0))  # 兼容 "4" / "8.0"
         item_name = item.get(name_field) or ""
 
         duration = 0
@@ -310,29 +310,90 @@ def _fetch_inference_v2():
     )
 
 
+def _merge_aggregations(a, b):
+    """将两次 aggregate() 结果 (leader_data, spec_gpu) 合并为一份。"""
+    if not a[0]:
+        return b
+    if not b[0]:
+        return a
+    ld_a, sp_a = a
+    ld_b, sp_b = b
+    merged_ld = {k: v for k, v in ld_a.items()}
+    for leader, ld in ld_b.items():
+        if leader not in merged_ld:
+            merged_ld[leader] = ld
+        else:
+            merged_ld[leader]['gpu_num']        += ld['gpu_num']
+            merged_ld[leader]['task_count']     += ld['task_count']
+            merged_ld[leader]['total_duration'] += ld['total_duration']
+            merged_ld[leader]['max_duration']    = max(
+                merged_ld[leader]['max_duration'], ld['max_duration'])
+            for member, md in ld['members'].items():
+                if member not in merged_ld[leader]['members']:
+                    merged_ld[leader]['members'][member] = md
+                else:
+                    m = merged_ld[leader]['members'][member]
+                    m['gpu_num']        += md['gpu_num']
+                    m['task_count']     += md['task_count']
+                    m['total_duration'] += md['total_duration']
+                    m['max_duration']    = max(m['max_duration'], md['max_duration'])
+                    m['tasks'].extend(md['tasks'])
+    merged_sp = {k: v for k, v in sp_a.items()}
+    for k, v in sp_b.items():
+        merged_sp[k] = merged_sp.get(k, 0) + v
+    return merged_ld, merged_sp
+
+
 def fetch_inference_data():
-    """合并 v1 + v2 推理服务数据"""
+    """分别处理 v1 / v2 推理服务（字段不同），再合并结果"""
     print("获取推理服务数据...")
-    items = []
-    for fn in (_fetch_inference_v1, _fetch_inference_v2):
-        data = fn()
-        if data:
-            # 响应字段名待确认：services / modelServiceList / serviceList
-            items.extend(
-                data.get("services") or data.get("modelServiceList") or data.get("serviceList") or []
+
+    # ── v1（字段待实际响应确认）────────────────────────────
+    result_v1 = (None, None)
+    data_v1 = _fetch_inference_v1()
+    if data_v1:
+        items_v1 = (data_v1.get("services")
+                    or data_v1.get("modelServiceList")
+                    or data_v1.get("serviceList") or [])
+        if items_v1:
+            result_v1 = aggregate(
+                items_v1,
+                user_field="creator",     # 待确认
+                gpu_field="xpuNum",       # 待确认
+                name_field="name",
+                spec_field="inferType",   # v1 无明确规格字段，暂用 inferType
+                status_field="status",
+                status_value="running",
+                region_field="region",
+                region_value=REGION,
+                duration_field="publishTime",
             )
-    if not items:
+
+    # ── v2（字段已由实际响应确认）──────────────────────────
+    result_v2 = (None, None)
+    data_v2 = _fetch_inference_v2()
+    if data_v2:
+        items_v2 = (data_v2.get("services")
+                    or data_v2.get("modelServiceList")
+                    or data_v2.get("serviceList") or [])
+        if items_v2:
+            result_v2 = aggregate(
+                items_v2,
+                user_field="creator",
+                gpu_field="xpuNum",        # 浮点字符串 "8.0" → int(float())
+                name_field="name",
+                spec_field="inferType",    # 响应中无规格字段，用 inferType 替代
+                status_field="status",
+                status_value="running",
+                region_field="region",
+                region_value=REGION,
+                duration_field="publishTime",  # ms 时间戳 → 计算已运行小时数
+            )
+
+    merged = _merge_aggregations(result_v1, result_v2)
+    if not merged[0]:
         return None, None
-    return aggregate(
-        items,
-        gpu_field="gpuNum",           # 确认：gpuNum / workingGpuNum / npuNum
-        name_field="name",
-        spec_field="specName",        # 确认：specName / flavor
-        status_field="status",
-        status_value="running",
-        duration_field="duration",
-        extra_fields=[("instanceCount", "instance_count")],
-    )
+    return merged
 
 
 # ── 缓存刷新 ──────────────────────────────────────────────

@@ -348,7 +348,7 @@ def fetch_inference_data():
     """分别处理 v1 / v2 推理服务（字段不同），再合并结果"""
     print("获取推理服务数据...")
 
-    # ── v1（字段待实际响应确认）────────────────────────────
+    # ── v1 ─────────────────────────────────────────────────
     result_v1 = (None, None)
     data_v1 = _fetch_inference_v1()
     if data_v1:
@@ -358,10 +358,10 @@ def fetch_inference_data():
         if items_v1:
             result_v1 = aggregate(
                 items_v1,
-                user_field="creator",     # 待确认
-                gpu_field="xpuNum",       # 待确认
+                user_field="creator",
+                gpu_field="xpuNum",
                 name_field="name",
-                spec_field="inferType",   # v1 无明确规格字段，暂用 inferType
+                spec_field="inferType",
                 status_field="status",
                 status_value="running",
                 region_field="region",
@@ -369,7 +369,7 @@ def fetch_inference_data():
                 duration_field="publishTime",
             )
 
-    # ── v2（字段已由实际响应确认）──────────────────────────
+    # ── v2 ─────────────────────────────────────────────────
     result_v2 = (None, None)
     data_v2 = _fetch_inference_v2()
     if data_v2:
@@ -380,14 +380,14 @@ def fetch_inference_data():
             result_v2 = aggregate(
                 items_v2,
                 user_field="creator",
-                gpu_field="xpuNum",        # 浮点字符串 "8.0" → int(float())
+                gpu_field="xpuNum",
                 name_field="name",
-                spec_field="inferType",    # 响应中无规格字段，用 inferType 替代
+                spec_field="inferType",
                 status_field="status",
                 status_value="running",
                 region_field="region",
                 region_value=REGION,
-                duration_field="publishTime",  # ms 时间戳 → 计算已运行小时数
+                duration_field="publishTime",
             )
 
     merged = _merge_aggregations(result_v1, result_v2)

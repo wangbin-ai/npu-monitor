@@ -1,241 +1,312 @@
-from flask import Flask, render_template, jsonify
+import json
 import base64
-import requests
+import re
 import time
 import pprint
-import pandas as pd
-import re
 import traceback
 import threading
 
+import requests
+import pandas as pd
+from pypinyin import lazy_pinyin
+from flask import Flask, render_template, jsonify
+
 app = Flask(__name__)
 
-
+# ── 鉴权配置 ──────────────────────────────────────────────
 APPID = "com.noah.pangu.rl"
 TOKEN = "xxxx"
+BASE_URL = "https://roma.huawei.com/csb/rest/saas/ei/eiWizard"
+COMMON_PARAMS = {
+    "appid": APPID,
+    "vendor": "HEC",
+    "region": "cn-southwest-2",
+}
+HEADERS = {
+    "content-type": "application/json;charset=UTF-8",
+    "csb-token": TOKEN,
+}
 
-# Cache configuration
-CACHE_EXPIRE = 300  # seconds (5 minutes)
+# ── 缓存配置 ──────────────────────────────────────────────
+CACHE_EXPIRE = 300  # 5 分钟
 
-# Thread-safe cache state
 _cache_lock = threading.Lock()
-cached_user_data = {}
-cached_spec_data = {}
-last_update_time = 0
+_cache = {
+    "train":     {"user_data": {}, "spec_data": {}},
+    "devenv":    {"user_data": {}, "spec_data": {}},
+    "inference": {"user_data": {}, "spec_data": {}},
+    "last_update": 0,
+}
 
-from pypinyin import lazy_pinyin
-
-# 读取Excel文件
+# ── 花名册解析 ────────────────────────────────────────────
 df = pd.read_excel('算法卡池先导用卡分配.xlsx', sheet_name='能力项用卡名单')
-
-# 获取能力项列名（跳过第一列的用卡信息和最后两列）
 capability_columns = df.columns[1:-2].tolist()
 
-# 构建结果字典
-usr_dict = {}
-usr_name_dict = {}
+usr_dict = {}       # key → leader
+usr_name_dict = {}  # key → 用户全名
 
 
 def get_first_letter(text):
     text = str(text).strip()
     if not text:
         return ''
-    first_char = text[0]
-    if '\u4e00' <= first_char <= '\u9fff':
-        return lazy_pinyin(first_char)[0][0].lower()
-    else:
-        return first_char.lower()
+    c = text[0]
+    return lazy_pinyin(c)[0][0].lower() if '\u4e00' <= c <= '\u9fff' else c.lower()
 
 
 def extract_id(text):
-    match = re.search(r'\d+', str(text))
-    if match:
-        return match.group()
-    return ''
+    m = re.search(r'\d+', str(text))
+    return m.group() if m else ''
 
 
 for col in capability_columns:
     leader = str(df[col].iloc[0]).strip() if pd.notna(df[col].iloc[0]) else ''
-
     for member in df[col].iloc[1:]:
-        if pd.notna(member) and str(member).strip() != 'nan':
-            member_str = str(member).strip()
-            if member_str and member_str != 'sum':
-                member_id = extract_id(member_str)
-                first_letter = get_first_letter(member_str)
-                key = f'{first_letter}{member_id}' if member_id else first_letter
-                usr_dict[key] = leader
-                usr_name_dict[key] = member_str
-                # 同时用纯工号存储，兼容API返回的纯数字userId
-                if member_id:
-                    usr_dict[member_id] = leader
-                    usr_name_dict[member_id] = member_str
+        if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
+            s = str(member).strip()
+            mid = extract_id(s)
+            key = f'{get_first_letter(s)}{mid}' if mid else get_first_letter(s)
+            usr_dict[key] = leader
+            usr_name_dict[key] = s
+            if mid:
+                usr_dict[mid] = leader
+                usr_name_dict[mid] = s
 
 
-def fetch_gpu_data():
-    """从API获取并处理GPU使用数据"""
-    print("开始获取GPU数据...")
-    url = "https://roma.huawei.com/csb/rest/saas/ei/eiWizard/train/job/list?"
-    print(f"usr_dict有{len(usr_dict)}个条目")
-
-    params = {
-        "appid": APPID,
-        "vendor": "HEC",
-        "region": "cn-southwest-2",
-        "trainApiVersion": "V2",
-    }
-
-    filter_param = b'{\n\t"pageSize":"500",\n\t"pageIndex":"0",\n\t"status":"8",\n\t"searchName":"",\n\t"filterParam":[\n\t\t{\n\t\t\t"key":"",\n\t\t\t"value":""\n\t\t}\n\t],\n\t"tagIds":[\n\t\t""\n\t]\n}'
-    encode_params = base64.b64encode(filter_param)
-    params["params"] = encode_params.decode("utf-8")
-
-    headers = {
-        "content-type": "application/json;charset=UTF-8",
-        "csb-token": TOKEN,
-    }
-
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return count_gpu_usage(data.get("trainJobs", []))
-        else:
-            print(f"请求失败，状态码：{response.status_code}")
-            return None, None
-    except Exception as e:
-        print(f"获取数据异常：{e}")
-        traceback.print_exc()
-        return None, None
+# ── 通用：用户信息查找 ────────────────────────────────────
+def resolve_user(user_id):
+    """返回 (user_name, leader_name)，找不到时降级返回 user_id 本身。"""
+    stripped = user_id.lstrip(user_id[0]) if user_id and user_id[0].isalpha() else None
+    user_name = usr_name_dict.get(user_id) or usr_name_dict.get(stripped) or user_id
+    leader_name = usr_dict.get(user_id) or usr_dict.get(stripped) or user_name
+    return user_name, leader_name
 
 
-def count_gpu_usage(task_list):
-    """统计用户和资源池的GPU使用情况，按leader->member->tasks层级组织"""
-    try:
-        leader_data = {}
-        spec_gpu = {}
+# ── 通用：按 leader→member→tasks 汇总 ────────────────────
+def aggregate(items, *, gpu_field, name_field, spec_field,
+              status_field=None, status_value=None,
+              duration_field=None, extra_fields=None):
+    """
+    通用汇总函数，适配训练作业、开发环境、推理服务。
 
-        for task in task_list:
-            if task.get("statusCode") != "8":
+    extra_fields: list of (src_key, dst_key) 额外字段映射
+    """
+    leader_data = {}
+    spec_gpu = {}
+    extra_fields = extra_fields or []
+
+    for item in items:
+        # 状态过滤（可选）
+        if status_field and status_value:
+            if item.get(status_field) != status_value:
                 continue
 
-            user_id = task.get("userId")
-            spec_name = task.get("specName")
+        user_id = item.get("userId") or ""
+        spec_name = item.get(spec_field) or "未知规格"
+        gpu_num = item.get(gpu_field) or 0
+        item_name = item.get(name_field) or ""
 
-            gpu_num = task.get("workingGpuNum", 0)
-            duration_str = task.get("duration", "0:0:0")
-            duration = int(duration_str.split(':')[0]) if duration_str and ':' in duration_str else 0
-            task_name = task.get('name')
+        duration = 0
+        if duration_field:
+            dur_str = item.get(duration_field, "0:0:0") or "0:0:0"
+            duration = int(dur_str.split(':')[0]) if ':' in dur_str else 0
 
-            # 获取用户全名 - 兼容多种key格式查询
-            user_name = (usr_name_dict.get(user_id) or
-                         usr_name_dict.get(user_id.lstrip(user_id[0]) if user_id and user_id[0].isalpha() else None) or
-                         user_id)
+        user_name, leader_name = resolve_user(user_id)
 
-            # 获取所属leader - 兼容多种key格式查询
-            leader_name = (usr_dict.get(user_id) or
-                           usr_dict.get(user_id.lstrip(user_id[0]) if user_id and user_id[0].isalpha() else None) or
-                           user_name)
+        task_json = {
+            'user':      user_name,
+            'gpu_num':   gpu_num,
+            'duration':  duration,
+            'task_name': item_name,
+            'spec_name': spec_name,
+        }
+        for src, dst in extra_fields:
+            task_json[dst] = item.get(src)
 
-            task_json = {
-                'user': user_name,
-                'gpu_num': gpu_num,
-                'duration': duration,
-                'task_name': task_name,
-                'spec_name': spec_name
+        # leader 层
+        if leader_name not in leader_data:
+            leader_data[leader_name] = {
+                'gpu_num': 0, 'task_count': 0,
+                'total_duration': 0, 'max_duration': 0,
+                'members': {},
             }
+        ld = leader_data[leader_name]
+        ld['gpu_num']       += gpu_num
+        ld['task_count']    += 1
+        ld['total_duration'] += duration
 
-            # 按leader组织数据
-            if leader_name not in leader_data:
-                leader_data[leader_name] = {
-                    'gpu_num': 0,
-                    'task_count': 0,
-                    'total_duration': 0,
-                    'max_duration': 0,
-                    'members': {}
-                }
+        # member 层
+        if user_name not in ld['members']:
+            ld['members'][user_name] = {
+                'gpu_num': 0, 'task_count': 0,
+                'total_duration': 0, 'max_duration': 0,
+                'tasks': [],
+            }
+        md = ld['members'][user_name]
+        md['gpu_num']       += gpu_num
+        md['task_count']    += 1
+        md['total_duration'] += duration
+        md['max_duration']   = max(md['max_duration'], duration)
+        md['tasks'].append(task_json)
 
-            leader_data[leader_name]['gpu_num'] += gpu_num
-            leader_data[leader_name]['task_count'] += 1
-            leader_data[leader_name]['total_duration'] += duration
+        # 资源池汇总
+        spec_gpu[spec_name] = spec_gpu.get(spec_name, 0) + gpu_num
 
-            # 按组员组织任务
-            if user_name not in leader_data[leader_name]['members']:
-                leader_data[leader_name]['members'][user_name] = {
-                    'gpu_num': 0,
-                    'task_count': 0,
-                    'total_duration': 0,
-                    'max_duration': 0,
-                    'tasks': []
-                }
+    # leader 最长 = 成员最长之最大
+    for ld in leader_data.values():
+        ld['max_duration'] = max(
+            (m['max_duration'] for m in ld['members'].values()), default=0
+        )
 
-            leader_data[leader_name]['members'][user_name]['gpu_num'] += gpu_num
-            leader_data[leader_name]['members'][user_name]['task_count'] += 1
-            leader_data[leader_name]['members'][user_name]['total_duration'] += duration
-            if duration > leader_data[leader_name]['members'][user_name]['max_duration']:
-                leader_data[leader_name]['members'][user_name]['max_duration'] = duration
-            leader_data[leader_name]['members'][user_name]['tasks'].append(task_json)
+    return leader_data, spec_gpu
 
-            # 统计资源池
-            if spec_name in spec_gpu:
-                spec_gpu[spec_name] += gpu_num
-            else:
-                spec_gpu[spec_name] = gpu_num
 
-        # 计算每个leader的最长任务时长（即其成员中最长任务时长的最大值）
-        for leader_name in leader_data:
-            max_member_duration = 0
-            for member_name in leader_data[leader_name]['members']:
-                member_max_duration = leader_data[leader_name]['members'][member_name]['max_duration']
-                if member_max_duration > max_member_duration:
-                    max_member_duration = member_max_duration
-            leader_data[leader_name]['max_duration'] = max_member_duration
-
-        pprint.pprint(leader_data)
-        pprint.pprint(spec_gpu)
-        return leader_data, spec_gpu
+# ── API 请求基础函数 ──────────────────────────────────────
+def _get(url, extra_params, filter_dict):
+    params = {**COMMON_PARAMS, **extra_params}
+    encoded = base64.b64encode(json.dumps(filter_dict, ensure_ascii=False).encode()).decode()
+    params["params"] = encoded
+    try:
+        r = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+        print(f"[HTTP {r.status_code}] {url}")
     except Exception as e:
-        print(f"统计数据异常：{e}")
+        print(f"请求异常 {url}: {e}")
         traceback.print_exc()
+    return None
+
+
+# ── 训练作业 ──────────────────────────────────────────────
+def fetch_train_data():
+    print("获取训练作业数据...")
+    data = _get(
+        f"{BASE_URL}/train/job/list",
+        {"trainApiVersion": "V2"},
+        {
+            "pageSize": "500", "pageIndex": "0", "status": "8",
+            "searchName": "", "filterParam": [{"key": "", "value": ""}],
+            "tagIds": [""],
+        },
+    )
+    if data is None:
         return None, None
+    return aggregate(
+        data.get("trainJobs", []),
+        gpu_field="workingGpuNum",
+        name_field="name",
+        spec_field="specName",
+        status_field="statusCode",
+        status_value="8",
+        duration_field="duration",
+    )
+
+
+# ── 开发环境（Notebook）────────────────────────────────────
+# TODO: 确认实际接口路径和返回字段后按需调整
+def fetch_devenv_data():
+    print("获取开发环境数据...")
+    data = _get(
+        f"{BASE_URL}/notebook/list",
+        {},
+        {
+            "pageSize": "500", "pageIndex": "0",
+            "status": "RUNNING",          # 运行中
+            "searchName": "",
+        },
+    )
+    if data is None:
+        return None, None
+    return aggregate(
+        data.get("instances", []),        # TODO: 确认列表字段名
+        gpu_field="workingGpuNum",
+        name_field="name",
+        spec_field="flavor",              # TODO: 确认规格字段名
+        status_field="status",
+        status_value="RUNNING",
+        duration_field="duration",
+    )
+
+
+# ── 推理服务 ──────────────────────────────────────────────
+# TODO: 确认实际接口路径和返回字段后按需调整
+def fetch_inference_data():
+    print("获取推理服务数据...")
+    data = _get(
+        f"{BASE_URL}/inference/service/list",
+        {},
+        {
+            "pageSize": "500", "pageIndex": "0",
+            "status": "running",
+            "searchName": "",
+        },
+    )
+    if data is None:
+        return None, None
+    return aggregate(
+        data.get("services", []),          # TODO: 确认列表字段名
+        gpu_field="gpuNum",                # TODO: 确认 GPU 字段名
+        name_field="name",
+        spec_field="specName",
+        status_field="status",
+        status_value="running",
+        duration_field="duration",
+        extra_fields=[("instanceCount", "instance_count")],
+    )
+
+
+# ── 缓存刷新 ──────────────────────────────────────────────
+def refresh_cache():
+    """获取三类数据并更新缓存。调用方需自己持有 _cache_lock。"""
+    fetchers = {
+        "train":     fetch_train_data,
+        "devenv":    fetch_devenv_data,
+        "inference": fetch_inference_data,
+    }
+    updated = False
+    for key, fn in fetchers.items():
+        user_data, spec_data = fn()
+        if user_data is not None:
+            _cache[key]["user_data"] = user_data
+            _cache[key]["spec_data"] = spec_data
+            updated = True
+        else:
+            print(f"[{key}] 获取失败，保留旧缓存")
+    if updated:
+        _cache["last_update"] = time.time()
 
 
 def get_cached_data():
-    """Return cached GPU data, refreshing if expired. Thread-safe."""
-    global cached_user_data, cached_spec_data, last_update_time
-
+    """返回三类缓存数据，必要时刷新。线程安全。"""
     with _cache_lock:
-        current_time = time.time()
-        age = current_time - last_update_time
-        if age > CACHE_EXPIRE or not cached_user_data:
-            print(f'缓存已过期（{age:.0f}s），重新获取数据...')
-            user_data, spec_data = fetch_gpu_data()
-            if user_data and spec_data:
-                cached_user_data = user_data
-                cached_spec_data = spec_data
-                last_update_time = current_time
-            else:
-                print('获取数据失败，继续使用旧缓存。')
+        age = time.time() - _cache["last_update"]
+        if age > CACHE_EXPIRE or not any(_cache[k]["user_data"] for k in ("train", "devenv", "inference")):
+            print(f"缓存过期（{age:.0f}s），重新拉取...")
+            refresh_cache()
         else:
-            print(f'使用缓存数据（{age:.0f}s / {CACHE_EXPIRE}s）...')
+            print(f"使用缓存（{age:.0f}s / {CACHE_EXPIRE}s）")
+        return {
+            "train":     dict(_cache["train"]),
+            "devenv":    dict(_cache["devenv"]),
+            "inference": dict(_cache["inference"]),
+            "last_update": _cache["last_update"],
+        }
 
-        return cached_user_data, cached_spec_data, last_update_time
 
-
+# ── 路由 ─────────────────────────────────────────────────
 @app.route('/')
 def index():
-    """渲染主页面"""
     return render_template('index_multi.html')
 
 
 @app.route('/data')
 def get_data():
-    """提供数据接口，支持缓存"""
-    user_data, spec_data, update_time = get_cached_data()
-
+    d = get_cached_data()
     return jsonify({
-        'user_data': user_data,
-        'spec_data': spec_data,
-        'update_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(update_time))
+        "train":     d["train"],
+        "devenv":    d["devenv"],
+        "inference": d["inference"],
+        "update_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(d["last_update"])),
     })
 
 

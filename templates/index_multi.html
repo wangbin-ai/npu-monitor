@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NPU 资源监控</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+:root {
+  --bg:       #0f1117;
+  --bg2:      #1a1d27;
+  --bg3:      #22263a;
+  --border:   #2e3347;
+  --accent:   #4f8ef7;
+  --accent2:  #36d9b0;
+  --accent3:  #f7a94f;
+  --accent4:  #f75f5f;
+  --text:     #e2e8f0;
+  --text2:    #8892a4;
+  --radius:   10px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'PingFang SC','Microsoft YaHei',sans-serif; font-size: 14px; }
+
+/* ── Header ── */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 28px; background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+header h1 span { color: var(--accent); }
+.update-info { font-size: 12px; color: var(--text2); }
+.update-info b { color: var(--accent2); }
+.refresh-btn {
+  cursor: pointer; padding: 6px 16px; border-radius: 6px;
+  background: var(--accent); color: #fff; border: none;
+  font-size: 13px; transition: opacity .2s;
+}
+.refresh-btn:hover { opacity: .85; }
+
+/* ── Summary cards ── */
+.summary-bar {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  padding: 18px 28px 0;
+}
+.card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 20px;
+}
+.card .label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.card .value { font-size: 28px; font-weight: 700; }
+.card .sub   { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.c-blue   .value { color: var(--accent);  }
+.c-green  .value { color: var(--accent2); }
+.c-orange .value { color: var(--accent3); }
+.c-red    .value { color: var(--accent4); }
+
+/* ── Charts row ── */
+.charts-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  padding: 14px 28px;
+}
+.chart-box {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px;
+}
+.chart-box h3 { font-size: 13px; color: var(--text2); margin-bottom: 8px; }
+.chart-box .echart { width: 100%; height: 220px; }
+
+/* ── Section panels ── */
+.panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 0 28px 28px; }
+.panel {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.panel-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; background: var(--bg3);
+  border-bottom: 1px solid var(--border); cursor: pointer;
+  user-select: none;
+}
+.panel-header .dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.panel-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
+.panel-header .badge {
+  padding: 2px 9px; border-radius: 20px; font-size: 11px;
+  background: rgba(255,255,255,.07);
+}
+
+/* ── Tree table ── */
+.tree-table { width: 100%; border-collapse: collapse; }
+.tree-table th, .tree-table td {
+  padding: 7px 10px; text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tree-table th { font-size: 11px; color: var(--text2); background: var(--bg3); }
+.tree-table td { font-size: 12px; }
+
+/* leader row */
+.row-leader { background: rgba(79,142,247,.07); cursor: pointer; }
+.row-leader td { font-weight: 600; }
+.row-leader:hover { background: rgba(79,142,247,.14); }
+.row-leader .toggle { margin-right: 6px; display: inline-block; transition: transform .2s; }
+.row-leader.open .toggle { transform: rotate(90deg); }
+
+/* member row */
+.row-member { background: rgba(255,255,255,.02); cursor: pointer; }
+.row-member:hover { background: rgba(255,255,255,.05); }
+.row-member td:first-child { padding-left: 22px; }
+.row-member .toggle { margin-right: 6px; display: inline-block; transition: transform .2s; }
+.row-member.open .toggle { transform: rotate(90deg); }
+
+/* task row */
+.row-task { display: none; }
+.row-task.visible { display: table-row; }
+.row-task td { color: var(--text2); }
+.row-task td:first-child { padding-left: 38px; }
+
+/* member group hidden */
+.member-group { display: none; }
+.member-group.visible { display: contents; }
+
+.gpu-bar {
+  display: inline-block; height: 6px; border-radius: 3px;
+  background: var(--accent); vertical-align: middle; margin-right: 6px;
+}
+.empty-tip { text-align: center; color: var(--text2); padding: 20px; font-size: 12px; }
+
+/* loading overlay */
+#loading {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; z-index: 99; display: none;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">加载中…</div>
+
+<header>
+  <h1>NPU <span>资源监控</span></h1>
+  <div class="update-info">上次更新：<b id="update-time">—</b></div>
+  <button class="refresh-btn" onclick="loadData(true)">刷新</button>
+</header>
+
+<!-- Summary cards -->
+<div class="summary-bar">
+  <div class="card c-blue">
+    <div class="label">开发环境 NPU</div>
+    <div class="value" id="sum-devenv">—</div>
+    <div class="sub" id="sum-devenv-tasks">— 个实例</div>
+  </div>
+  <div class="card c-green">
+    <div class="label">训练作业 NPU</div>
+    <div class="value" id="sum-train">—</div>
+    <div class="sub" id="sum-train-tasks">— 个任务</div>
+  </div>
+  <div class="card c-orange">
+    <div class="label">推理服务 NPU</div>
+    <div class="value" id="sum-inference">—</div>
+    <div class="sub" id="sum-inference-tasks">— 个服务</div>
+  </div>
+  <div class="card c-red">
+    <div class="label">NPU 合计</div>
+    <div class="value" id="sum-total">—</div>
+    <div class="sub">全部资源占用</div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="charts-row">
+  <div class="chart-box">
+    <h3>各资源池 NPU 占用（训练）</h3>
+    <div class="echart" id="chart-spec-train"></div>
+  </div>
+  <div class="chart-box">
+    <h3>各小组 NPU 占用分布（训练）</h3>
+    <div class="echart" id="chart-leader-train"></div>
+  </div>
+</div>
+
+<!-- Three panels -->
+<div class="panels">
+  <!-- 开发环境 -->
+  <div class="panel" id="panel-devenv">
+    <div class="panel-header" onclick="togglePanel('devenv')">
+      <span class="dot" style="background:var(--accent)"></span>
+      <h2>开发环境</h2>
+      <span class="badge" id="badge-devenv">—</span>
+    </div>
+    <div id="body-devenv" style="overflow-x:auto">
+      <table class="tree-table">
+        <thead><tr>
+          <th style="width:38%">小组 / 成员 / 实例</th>
+          <th>NPU</th>
+          <th>时长(h)</th>
+          <th>规格</th>
+        </tr></thead>
+        <tbody id="tbody-devenv"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 训练作业 -->
+  <div class="panel" id="panel-train">
+    <div class="panel-header" onclick="togglePanel('train')">
+      <span class="dot" style="background:var(--accent2)"></span>
+      <h2>训练作业</h2>
+      <span class="badge" id="badge-train">—</span>
+    </div>
+    <div id="body-train" style="overflow-x:auto">
+      <table class="tree-table">
+        <thead><tr>
+          <th style="width:38%">小组 / 成员 / 任务</th>
+          <th>NPU</th>
+          <th>时长(h)</th>
+          <th>规格</th>
+        </tr></thead>
+        <tbody id="tbody-train"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 推理服务 -->
+  <div class="panel" id="panel-inference">
+    <div class="panel-header" onclick="togglePanel('inference')">
+      <span class="dot" style="background:var(--accent3)"></span>
+      <h2>推理服务</h2>
+      <span class="badge" id="badge-inference">—</span>
+    </div>
+    <div id="body-inference" style="overflow-x:auto">
+      <table class="tree-table">
+        <thead><tr>
+          <th style="width:38%">小组 / 成员 / 服务</th>
+          <th>NPU</th>
+          <th>时长(h)</th>
+          <th>规格</th>
+        </tr></thead>
+        <tbody id="tbody-inference"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Charts ────────────────────────────────────────────────
+const COLORS = ['#4f8ef7','#36d9b0','#f7a94f','#f75f5f','#a78bfa','#34d399','#fbbf24','#60a5fa'];
+
+function makeBarChart(elId, names, values, color) {
+  const chart = echarts.init(document.getElementById(elId), 'dark');
+  chart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 12, right: 12, top: 8, bottom: 4, containLabel: true },
+    xAxis: { type: 'value', splitLine: { lineStyle: { color: '#2e3347' } } },
+    yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11 } },
+    series: [{ type: 'bar', data: values, itemStyle: { color }, barMaxWidth: 18 }],
+  });
+  window.addEventListener('resize', () => chart.resize());
+}
+
+function makePieChart(elId, seriesData) {
+  const chart = echarts.init(document.getElementById(elId), 'dark');
+  chart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'item', formatter: '{b}: {c} NPU ({d}%)' },
+    legend: { orient: 'vertical', right: 0, top: 'center', textStyle: { fontSize: 11 } },
+    color: COLORS,
+    series: [{
+      type: 'pie', radius: ['40%', '68%'], center: ['38%', '50%'],
+      data: seriesData,
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 12 } },
+    }],
+  });
+  window.addEventListener('resize', () => chart.resize());
+}
+
+// ── Tree table renderer ───────────────────────────────────
+let _maxGpu = {};
+
+function renderTable(type, userData) {
+  const tbody = document.getElementById(`tbody-${type}`);
+  if (!userData || Object.keys(userData).length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-tip">暂无数据</td></tr>`;
+    return;
+  }
+
+  // 计算最大 gpu 用于进度条比例
+  _maxGpu[type] = Math.max(...Object.values(userData).map(l => l.gpu_num), 1);
+
+  let totalGpu = 0, totalTasks = 0;
+  const sorted = Object.entries(userData).sort((a, b) => b[1].gpu_num - a[1].gpu_num);
+
+  let html = '';
+  sorted.forEach(([leader, ld], li) => {
+    totalGpu += ld.gpu_num;
+    totalTasks += ld.task_count;
+    const barW = Math.round(ld.gpu_num / _maxGpu[type] * 80);
+    html += `
+<tr class="row-leader" onclick="toggleLeader(this,'leader-${type}-${li}')">
+  <td><span class="toggle">▶</span>${leader}</td>
+  <td><span class="gpu-bar" style="width:${barW}px"></span>${ld.gpu_num}</td>
+  <td>${ld.max_duration}h</td>
+  <td>${ld.task_count} 个</td>
+</tr>`;
+
+    const memSorted = Object.entries(ld.members).sort((a, b) => b[1].gpu_num - a[1].gpu_num);
+    html += `<tr class="member-group" id="leader-${type}-${li}"><td colspan="4" style="padding:0">
+<table class="tree-table" style="border:none">`;
+    memSorted.forEach(([member, md], mi) => {
+      html += `
+<tr class="row-member" onclick="toggleMember(this,'member-${type}-${li}-${mi}')">
+  <td><span class="toggle">▶</span>${member}</td>
+  <td>${md.gpu_num}</td>
+  <td>${md.max_duration}h</td>
+  <td>${md.task_count} 个</td>
+</tr>`;
+      md.tasks.forEach((t, ti) => {
+        html += `
+<tr class="row-task" id="member-${type}-${li}-${mi}-${ti}">
+  <td title="${t.task_name}">${t.task_name}</td>
+  <td>${t.gpu_num}</td>
+  <td>${t.duration}h</td>
+  <td title="${t.spec_name}">${t.spec_name}</td>
+</tr>`;
+      });
+    });
+    html += `</table></td></tr>`;
+  });
+
+  tbody.innerHTML = html;
+  return { totalGpu, totalTasks };
+}
+
+// ── Toggle helpers ────────────────────────────────────────
+function toggleLeader(row, groupId) {
+  row.classList.toggle('open');
+  const group = document.getElementById(groupId);
+  group.classList.toggle('visible');
+}
+
+function toggleMember(row, memberId) {
+  row.classList.toggle('open');
+  // tasks share the memberId prefix
+  document.querySelectorAll(`[id^="${memberId}-"]`).forEach(el => {
+    el.classList.toggle('visible');
+  });
+}
+
+function togglePanel(type) {
+  const body = document.getElementById(`body-${type}`);
+  body.style.display = body.style.display === 'none' ? '' : 'none';
+}
+
+// ── Main data loader ──────────────────────────────────────
+function loadData(force) {
+  const loading = document.getElementById('loading');
+  loading.style.display = 'flex';
+
+  fetch('/data' + (force ? '?force=1' : ''))
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('update-time').textContent = data.update_time;
+
+      // Render each section
+      const sections = { devenv: '开发环境', train: '训练作业', inference: '推理服务' };
+      let grandTotal = 0;
+
+      Object.keys(sections).forEach(type => {
+        const section = data[type] || {};
+        const userData = section.user_data || {};
+        const specData = section.spec_data || {};
+
+        const result = renderTable(type, userData);
+        const totalGpu   = result ? result.totalGpu   : 0;
+        const totalTasks = result ? result.totalTasks  : 0;
+        grandTotal += totalGpu;
+
+        document.getElementById(`sum-${type}`).textContent = totalGpu;
+        const subEl = document.getElementById(`sum-${type}-tasks`);
+        if (subEl) subEl.textContent = `${totalTasks} 个${type === 'train' ? '任务' : type === 'inference' ? '服务' : '实例'}`;
+        document.getElementById(`badge-${type}`).textContent = `${totalGpu} NPU · ${totalTasks} 个`;
+      });
+
+      document.getElementById('sum-total').textContent = grandTotal;
+
+      // Charts for train
+      const trainSpec  = (data.train || {}).spec_data  || {};
+      const trainUsers = (data.train || {}).user_data  || {};
+
+      const specEntries   = Object.entries(trainSpec).sort((a, b) => b[1] - a[1]).slice(0, 12);
+      const leaderEntries = Object.entries(trainUsers)
+        .map(([k, v]) => [k, v.gpu_num])
+        .sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+      makeBarChart('chart-spec-train',
+        specEntries.map(e => e[0]), specEntries.map(e => e[1]), '#4f8ef7');
+
+      makePieChart('chart-leader-train',
+        leaderEntries.map(([name, val]) => ({ name, value: val })));
+    })
+    .catch(err => {
+      console.error(err);
+      alert('数据加载失败，请检查后端服务');
+    })
+    .finally(() => { loading.style.display = 'none'; });
+}
+
+// Auto-refresh every 5 minutes
+loadData(false);
+setInterval(() => loadData(false), 300_000);
+</script>
+</body>
+</html>

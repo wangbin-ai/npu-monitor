@@ -19,13 +19,13 @@ APPID         = "com.noah.pangu.rl"
 API_VERSION   = "v1"                        # demanager 接口 version 参数
 VENDOR        = "HEC"
 REGION        = "cn-southwest-2"
-AUTHORIZATION = "xxxx"                      # Authorization header 值
+csb_token = "xxxx"                      # Authorization header 值
 X_HW_ID       = "xxxx"                      # X-HW-ID header 值
 X_HW_APPKEY   = "xxxx"                      # X-HW-APPKEY header 值
 
 HEADERS = {
     "content-Type":  "application/json",
-    "Authorization": AUTHORIZATION,
+    "csb-token": csb_token,
     "X-HW-ID":       X_HW_ID,
     "X-HW-APPKEY":   X_HW_APPKEY,
 }
@@ -265,7 +265,7 @@ def fetch_train_data():
             "params": _b64({
                 "pageSize":  "500",
                 "pageIndex": "0",
-                "status":    "8",
+#                "status":    "8",
             }),
         },
     )

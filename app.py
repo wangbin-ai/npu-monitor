@@ -87,32 +87,50 @@ def resolve_user(user_id):
 
 # ── 通用：按 leader→member→tasks 汇总 ────────────────────
 def aggregate(items, *, gpu_field, name_field, spec_field,
+              user_field="userId",
               status_field=None, status_value=None,
+              region_field=None, region_value=None,
               duration_field=None, extra_fields=None):
     """
     通用汇总函数，适配训练作业、开发环境、推理服务。
 
-    extra_fields: list of (src_key, dst_key) 额外字段映射
+    user_field:     记录用户 ID 的字段名，默认 "userId"
+    region_field/region_value: 可选的 region 过滤
+    duration_field: 值可为 "HH:MM:SS" 字符串，或毫秒时间戳（createTime）
+    extra_fields:   list of (src_key, dst_key) 额外字段映射
     """
     leader_data = {}
     spec_gpu = {}
     extra_fields = extra_fields or []
 
+    now_ms = time.time() * 1000
+
     for item in items:
-        # 状态过滤（可选）
+        # 状态过滤
         if status_field and status_value:
             if item.get(status_field) != status_value:
                 continue
+        # region 过滤
+        if region_field and region_value:
+            if item.get(region_field) != region_value:
+                continue
 
-        user_id = item.get("userId") or ""
+        user_id = item.get(user_field) or ""
         spec_name = item.get(spec_field) or "未知规格"
-        gpu_num = item.get(gpu_field) or 0
+        gpu_num = int(item.get(gpu_field) or 0)   # 兼容字符串 "4"
         item_name = item.get(name_field) or ""
 
         duration = 0
         if duration_field:
-            dur_str = item.get(duration_field, "0:0:0") or "0:0:0"
-            duration = int(dur_str.split(':')[0]) if ':' in dur_str else 0
+            raw = item.get(duration_field)
+            if raw:
+                raw_str = str(raw)
+                if ':' in raw_str:
+                    # "HH:MM:SS" 格式
+                    duration = int(raw_str.split(':')[0])
+                elif raw_str.isdigit() and int(raw_str) > 1_000_000_000_000:
+                    # 毫秒时间戳（createTime）→ 计算已运行小时数
+                    duration = int((now_ms - int(raw_str)) / 3_600_000)
 
         user_name, leader_name = resolve_user(user_id)
 
@@ -215,12 +233,15 @@ def fetch_devenv_data():
     items = data.get("devEnvironments") or data.get("instances") or data.get("devEnvs") or []
     return aggregate(
         items,
-        gpu_field="workingNpuNum",   # 确认：workingNpuNum / npuNum / workingGpuNum
+        user_field="creator",         # 开发环境用 creator 字段标识用户
+        gpu_field="npuNum",           # 字符串 "4" → 自动转 int
         name_field="name",
-        spec_field="flavor",          # 确认：flavor / specName
+        spec_field="flavor",
         status_field="status",
         status_value="RUNNING",
-        duration_field="duration",    # 确认：duration / runningTime；无则置 None
+        region_field="region",
+        region_value=REGION,
+        duration_field="createTime",  # 毫秒时间戳 → 自动计算已运行小时数
     )
 
 

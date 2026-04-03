@@ -2,9 +2,9 @@ import json
 import base64
 import re
 import time
-import pprint
 import traceback
 import threading
+from pathlib import Path
 
 import requests
 import pandas as pd
@@ -19,13 +19,13 @@ APPID         = "com.noah.pangu.rl"
 API_VERSION   = "v1"                        # demanager 接口 version 参数
 VENDOR        = "HEC"
 REGION        = "cn-southwest-2"
-AUTHORIZATION = "xxxx"                      # Authorization header 值
+csb_token = "xxxx"                      # Authorization header 值
 X_HW_ID       = "xxxx"                      # X-HW-ID header 值
 X_HW_APPKEY   = "xxxx"                      # X-HW-APPKEY header 值
 
 HEADERS = {
     "content-Type":  "application/json",
-    "Authorization": AUTHORIZATION,
+    "csb-token": csb_token,
     "X-HW-ID":       X_HW_ID,
     "X-HW-APPKEY":   X_HW_APPKEY,
 }
@@ -42,7 +42,13 @@ _cache = {
 }
 
 # ── 花名册解析 ────────────────────────────────────────────
-df = pd.read_excel('算法卡池先导用卡分配.xlsx', sheet_name='能力项用卡名单')
+_BASE_DIR = Path(__file__).parent
+_EXCEL_PATH = _BASE_DIR / '算法卡池先导用卡分配.xlsx'
+try:
+    df = pd.read_excel(_EXCEL_PATH, sheet_name='能力项用卡名单')
+    print(f"花名册加载成功：{_EXCEL_PATH}，共 {len(df)} 行")
+except FileNotFoundError:
+    raise SystemExit(f"[ERROR] 找不到花名册文件：{_EXCEL_PATH}")
 capability_columns = df.columns[1:-2].tolist()
 
 usr_dict = {}       # key → leader
@@ -229,20 +235,29 @@ def fetch_devenv_data():
     )
     if data is None:
         return None, None
-    # 响应字段名待确认：devEnvironments / instances / devEnvs
-    items = data.get("devEnvironments") or data.get("instances") or data.get("devEnvs") or []
-    return aggregate(
+    print(f"[devenv] 响应顶层字段: {list(data.keys())}")
+    # 尝试所有可能的列表字段名
+    items = (data.get("devEnvironments")
+             or data.get("instances")
+             or data.get("devEnvs")
+             or data.get("devEnvList")
+             or data.get("list")
+             or [])
+    print(f"[devenv] 获取到 {len(items)} 条记录（过滤前）")
+    result = aggregate(
         items,
-        user_field="creator",         # 开发环境用 creator 字段标识用户
-        gpu_field="npuNum",           # 字符串 "4" → 自动转 int
+        user_field="creator",
+        gpu_field="npuNum",
         name_field="name",
         spec_field="flavor",
         status_field="status",
         status_value="RUNNING",
         region_field="region",
         region_value=REGION,
-        duration_field="createTime",  # 毫秒时间戳 → 自动计算已运行小时数
+        duration_field="createTime",
     )
+    print(f"[devenv] 过滤后 leader 数: {len(result[0]) if result[0] else 0}")
+    return result
 
 
 # ── 训练作业 ──────────────────────────────────────────────
@@ -259,7 +274,7 @@ def fetch_train_data():
             "params": _b64({
                 "pageSize":  "500",
                 "pageIndex": "0",
-                "status":    "8",
+#                "status":    "8",
             }),
         },
     )
@@ -452,4 +467,9 @@ def get_data():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5063, debug=False)
+    import socket
+    PORT = 5063
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(('127.0.0.1', PORT)) == 0:
+            raise SystemExit(f"[ERROR] 端口 {PORT} 已被占用，请先停止旧进程（lsof -i :{PORT}）")
+    app.run(host='0.0.0.0', port=PORT, debug=False)

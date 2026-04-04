@@ -65,8 +65,8 @@ def get_first_letter(text):
 
 
 def extract_id(text):
-    m = re.search(r'\d+', str(text))
-    return m.group() if m else ''
+    s = str(text).strip()
+    return s[1:] if s and s[0].isalpha() else s
 
 
 for col in capability_columns:
@@ -86,7 +86,7 @@ for col in capability_columns:
 # ── 通用：用户信息查找 ────────────────────────────────────
 def resolve_user(user_id):
     """返回 (user_name, leader_name)，找不到时降级返回 user_id 本身。"""
-    stripped = user_id.lstrip(user_id[0]) if user_id and user_id[0].isalpha() else None
+    stripped = user_id[1:] if user_id and user_id[0].isalpha() else None
     user_name = usr_name_dict.get(user_id) or usr_name_dict.get(stripped) or user_id
     leader_name = usr_dict.get(user_id) or usr_dict.get(stripped) or user_name
     return user_name, leader_name

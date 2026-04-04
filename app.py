@@ -5,6 +5,7 @@ import time
 import traceback
 import threading
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 import pandas as pd
@@ -235,16 +236,8 @@ def fetch_devenv_data():
     )
     if data is None:
         return None, None
-    print(f"[devenv] 响应顶层字段: {list(data.keys())}")
-    # 尝试所有可能的列表字段名
-    items = (data.get("devEnvironments")
-             or data.get("instances")
-             or data.get("devEnvs")
-             or data.get("devEnvList")
-             or data.get("list")
-             or [])
-    print(f"[devenv] 获取到 {len(items)} 条记录（过滤前）")
-    result = aggregate(
+    items = data.get("notebooks") or []
+    return aggregate(
         items,
         user_field="creator",
         gpu_field="npuNum",
@@ -256,8 +249,6 @@ def fetch_devenv_data():
         region_value=REGION,
         duration_field="createTime",
     )
-    print(f"[devenv] 过滤后 leader 数: {len(result[0]) if result[0] else 0}")
-    return result
 
 
 # ── 训练作业 ──────────────────────────────────────────────
@@ -413,21 +404,27 @@ def fetch_inference_data():
 
 # ── 缓存刷新 ──────────────────────────────────────────────
 def refresh_cache():
-    """获取三类数据并更新缓存。调用方需自己持有 _cache_lock。"""
+    """并行拉取三类数据并更新缓存。调用方需自己持有 _cache_lock。"""
     fetchers = {
         "train":     fetch_train_data,
         "devenv":    fetch_devenv_data,
         "inference": fetch_inference_data,
     }
     updated = False
-    for key, fn in fetchers.items():
-        user_data, spec_data = fn()
-        if user_data is not None:
-            _cache[key]["user_data"] = user_data
-            _cache[key]["spec_data"] = spec_data
-            updated = True
-        else:
-            print(f"[{key}] 获取失败，保留旧缓存")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(fn): key for key, fn in fetchers.items()}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                user_data, spec_data = future.result()
+                if user_data is not None:
+                    _cache[key]["user_data"] = user_data
+                    _cache[key]["spec_data"] = spec_data
+                    updated = True
+                else:
+                    print(f"[{key}] 获取失败，保留旧缓存")
+            except Exception as e:
+                print(f"[{key}] 异常：{e}")
     if updated:
         _cache["last_update"] = time.time()
 

@@ -7,411 +7,514 @@
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
 :root {
-  --bg:       #0f1117;
-  --bg2:      #1a1d27;
-  --bg3:      #22263a;
-  --border:   #2e3347;
-  --accent:   #4f8ef7;
-  --accent2:  #36d9b0;
-  --accent3:  #f7a94f;
-  --accent4:  #f75f5f;
-  --text:     #e2e8f0;
-  --text2:    #8892a4;
-  --radius:   10px;
+  --bg:        #080c14;
+  --bg2:       #0d1220;
+  --bg3:       #121828;
+  --bg-card:   rgba(255,255,255,.035);
+  --border:    rgba(255,255,255,.07);
+  --border-hi: rgba(255,255,255,.14);
+  --blue:   #3b82f6;
+  --cyan:   #06b6d4;
+  --green:  #10b981;
+  --orange: #f59e0b;
+  --red:    #ef4444;
+  --purple: #8b5cf6;
+  --pink:   #ec4899;
+  --text:   #e2e8f0;
+  --text2:  #64748b;
+  --text3:  #94a3b8;
+  --r:      14px;
+  --r-sm:   8px;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: 'PingFang SC','Microsoft YaHei',sans-serif; font-size: 14px; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'PingFang SC','Microsoft YaHei',sans-serif;font-size:15px;min-height:100vh}
 
 /* ── Header ── */
-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 28px; background: var(--bg2);
-  border-bottom: 1px solid var(--border);
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 28px;
+  background:rgba(13,18,32,.9);
+  border-bottom:1px solid var(--border);
+  backdrop-filter:blur(12px);
+  position:sticky;top:0;z-index:10;
 }
-header h1 { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
-header h1 span { color: var(--accent); }
-.update-info { font-size: 12px; color: var(--text2); }
-.update-info b { color: var(--accent2); }
-.refresh-btn {
-  cursor: pointer; padding: 6px 16px; border-radius: 6px;
-  background: var(--accent); color: #fff; border: none;
-  font-size: 13px; transition: opacity .2s;
+.header-left{display:flex;align-items:center;gap:12px}
+.header-logo{
+  width:34px;height:34px;border-radius:9px;
+  background:linear-gradient(135deg,var(--blue),var(--purple));
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:700;color:#fff;
 }
-.refresh-btn:hover { opacity: .85; }
+header h1{font-size:19px;font-weight:700;letter-spacing:.5px}
+header h1 span{
+  background:linear-gradient(90deg,var(--blue),var(--cyan));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.header-right{display:flex;align-items:center;gap:16px}
+.update-info{font-size:13px;color:var(--text2)}
+.update-info b{color:var(--green);font-weight:500}
+.refresh-btn{
+  cursor:pointer;padding:7px 18px;border-radius:var(--r-sm);
+  background:linear-gradient(135deg,var(--blue),var(--purple));
+  color:#fff;border:none;font-size:13px;font-weight:500;
+  transition:opacity .2s;letter-spacing:.3px;
+}
+.refresh-btn:hover{opacity:.85}
+
+/* ── Top grid ── */
+.top-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:16px;padding:20px 28px 0;align-items:stretch;
+}
 
 /* ── Summary cards ── */
-.summary-bar {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
-  padding: 18px 28px 0;
+.cards-col{display:flex;flex-direction:column;gap:12px}
+.cards-col .s-card{flex:1}
+.s-card{
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--r);padding:20px 22px;
+  display:flex;flex-direction:column;justify-content:center;
+  position:relative;overflow:hidden;transition:border-color .2s;
 }
-.card {
-  background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 16px 20px;
+.s-card:hover{border-color:var(--border-hi)}
+.s-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
 }
-.card .label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
-.card .value { font-size: 28px; font-weight: 700; }
-.card .sub   { font-size: 12px; color: var(--text2); margin-top: 4px; }
-.c-blue   .value { color: var(--accent);  }
-.c-green  .value { color: var(--accent2); }
-.c-orange .value { color: var(--accent3); }
-.c-red    .value { color: var(--accent4); }
+.s-card.c-blue::before{background:linear-gradient(90deg,var(--blue),var(--cyan))}
+.s-card.c-green::before{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.s-card.c-orange::before{background:linear-gradient(90deg,var(--orange),var(--pink))}
+.s-card.c-red::before{background:linear-gradient(90deg,var(--red),var(--purple))}
+.s-card .lbl{font-size:13px;color:var(--text2);margin-bottom:8px;font-weight:500}
+.s-card .val{font-size:38px;font-weight:800;line-height:1;letter-spacing:-1px}
+.s-card.c-blue   .val{background:linear-gradient(135deg,var(--blue),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.s-card.c-green  .val{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.s-card.c-orange .val{background:linear-gradient(135deg,var(--orange),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.s-card.c-red    .val{background:linear-gradient(135deg,var(--red),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.s-card .sub{font-size:13px;color:var(--text2);margin-top:6px}
 
-/* ── Charts row ── */
-.charts-row {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
-  padding: 14px 28px;
+/* ── Chart boxes ── */
+.chart-box{
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--r);padding:20px 20px 16px;
+  display:flex;flex-direction:column;
 }
-.chart-box {
-  background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 14px;
+.chart-title{
+  display:flex;align-items:center;gap:8px;
+  font-size:14px;font-weight:600;color:var(--text3);
+  margin-bottom:12px;flex-shrink:0;
 }
-.chart-box h3 { font-size: 13px; color: var(--text2); margin-bottom: 8px; }
-.chart-box .echart { width: 100%; height: 220px; }
+.chart-title .icon{font-size:15px}
+.chart-box .echart{flex:1;min-height:260px;width:100%}
 
-/* ── Section panels ── */
-.panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 0 28px 28px; }
-.panel {
-  background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden;
+/* ── Panel section ── */
+.panels{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:16px 28px 28px}
+.panel{border-radius:var(--r);overflow:hidden;background:var(--bg-card);border:1px solid var(--border)}
+.panel-hdr{
+  display:flex;align-items:center;gap:10px;
+  padding:16px 20px;cursor:pointer;user-select:none;
+  border-bottom:1px solid var(--border);
+  background:rgba(255,255,255,.02);
 }
-.panel-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 13px 16px; background: var(--bg3);
-  border-bottom: 1px solid var(--border); cursor: pointer;
-  user-select: none;
+.panel-hdr:hover{background:rgba(255,255,255,.04)}
+.panel-icon{font-size:16px}
+.panel-hdr h2{font-size:15px;font-weight:700;flex:1}
+.panel-badge{
+  font-size:12px;padding:3px 12px;border-radius:20px;
+  font-weight:500;letter-spacing:.2px;
 }
-.panel-header .dot {
-  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+.badge-blue  {background:rgba(59,130,246,.15);color:var(--blue)}
+.badge-green {background:rgba(16,185,129,.15);color:var(--green)}
+.badge-orange{background:rgba(245,158,11,.15);color:var(--orange)}
+
+/* ── Leader card rows ── */
+.leader-list{padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.leader-card{
+  background:rgba(255,255,255,.03);border:1px solid var(--border);
+  border-radius:var(--r-sm);overflow:hidden;transition:border-color .2s;
 }
-.panel-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
-.panel-header .badge {
-  padding: 2px 9px; border-radius: 20px; font-size: 11px;
-  background: rgba(255,255,255,.07);
+.leader-card:hover{border-color:var(--border-hi)}
+.leader-row{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 14px;cursor:pointer;
+}
+.expand-btn{
+  color:var(--text2);font-size:11px;transition:transform .25s;flex-shrink:0;
+}
+.leader-card.open .expand-btn{transform:rotate(90deg)}
+.avatar{
+  width:36px;height:36px;border-radius:9px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;color:#fff;
+}
+.leader-info{flex:1;min-width:0}
+.leader-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.leader-meta{font-size:12px;color:var(--text2);margin-top:2px}
+.leader-stats{display:flex;gap:20px;flex-shrink:0}
+.stat-item{text-align:center}
+.stat-lbl{font-size:11px;color:var(--text2);margin-bottom:2px;white-space:nowrap}
+.stat-val{font-size:15px;font-weight:700}
+.stat-npu {color:var(--blue)}
+.stat-task{color:var(--green)}
+.stat-dur {color:var(--purple)}
+.leader-badge{
+  font-size:11px;padding:4px 10px;border-radius:20px;
+  background:rgba(245,158,11,.15);color:var(--orange);
+  font-weight:600;flex-shrink:0;white-space:nowrap;
 }
 
-/* ── Tree table ── */
-.tree-table { width: 100%; border-collapse: collapse; }
-.tree-table th, .tree-table td {
-  padding: 7px 10px; text-align: left;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* ── Member rows ── */
+.member-list{display:none;padding:0 14px 10px;flex-direction:column;gap:6px}
+.leader-card.open .member-list{display:flex}
+.member-card{
+  background:rgba(255,255,255,.02);border:1px solid var(--border);
+  border-radius:var(--r-sm);overflow:hidden;
 }
-.tree-table th { font-size: 11px; color: var(--text2); background: var(--bg3); }
-.tree-table td { font-size: 12px; }
-
-/* leader row */
-.row-leader { background: rgba(79,142,247,.07); cursor: pointer; }
-.row-leader td { font-weight: 600; }
-.row-leader:hover { background: rgba(79,142,247,.14); }
-.row-leader .toggle { margin-right: 6px; display: inline-block; transition: transform .2s; }
-.row-leader.open .toggle { transform: rotate(90deg); }
-
-/* member row */
-.row-member { background: rgba(255,255,255,.02); cursor: pointer; }
-.row-member:hover { background: rgba(255,255,255,.05); }
-.row-member td:first-child { padding-left: 22px; }
-.row-member .toggle { margin-right: 6px; display: inline-block; transition: transform .2s; }
-.row-member.open .toggle { transform: rotate(90deg); }
-
-/* task row */
-.row-task { display: none; }
-.row-task.visible { display: table-row; }
-.row-task td { color: var(--text2); }
-.row-task td:first-child { padding-left: 38px; }
-
-/* member group hidden */
-.member-group { display: none; }
-.member-group.visible { display: contents; }
-
-.gpu-bar {
-  display: inline-block; height: 6px; border-radius: 3px;
-  background: var(--accent); vertical-align: middle; margin-right: 6px;
+.member-row{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;cursor:pointer;
 }
-.empty-tip { text-align: center; color: var(--text2); padding: 20px; font-size: 12px; }
-
-/* loading overlay */
-#loading {
-  position: fixed; inset: 0; background: rgba(0,0,0,.6);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 16px; z-index: 99; display: none;
+.member-row .expand-btn{font-size:10px}
+.member-card.open .member-row .expand-btn{transform:rotate(90deg)}
+.m-avatar{
+  width:28px;height:28px;border-radius:6px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:#fff;opacity:.8;
 }
+.member-name{font-size:13px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.member-stats{display:flex;gap:14px;flex-shrink:0}
+.member-stats .stat-val{font-size:13px}
+
+/* ── Task rows ── */
+.task-list{display:none;padding:0 12px 8px;flex-direction:column;gap:4px}
+.member-card.open .task-list{display:flex}
+.task-row{
+  display:flex;align-items:center;gap:10px;
+  padding:7px 10px;border-radius:6px;
+  background:rgba(255,255,255,.015);font-size:12px;color:var(--text3);
+}
+.task-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-gpu{color:var(--blue);font-weight:600;flex-shrink:0}
+.task-dur{color:var(--text2);flex-shrink:0;min-width:36px;text-align:right}
+.task-spec{color:var(--text2);flex-shrink:0;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.empty-tip{padding:28px;text-align:center;color:var(--text2);font-size:14px}
+
+/* ── Loading ── */
+#loading{
+  position:fixed;inset:0;z-index:99;
+  background:rgba(8,12,20,.75);backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;
+}
+.spinner{
+  width:36px;height:36px;border-radius:50%;
+  border:3px solid rgba(255,255,255,.1);
+  border-top-color:var(--blue);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading p{font-size:14px;color:var(--text3)}
 </style>
 </head>
 <body>
 
-<div id="loading">加载中…</div>
+<div id="loading"><div class="spinner"></div><p>数据加载中…</p></div>
 
 <header>
-  <h1>NPU <span>资源监控</span></h1>
-  <div class="update-info">上次更新：<b id="update-time">—</b></div>
-  <button class="refresh-btn" onclick="loadData(true)">刷新</button>
+  <div class="header-left">
+    <div class="header-logo">N</div>
+    <h1>NPU <span>资源监控</span></h1>
+  </div>
+  <div class="header-right">
+    <div class="update-info">更新于 <b id="update-time">—</b></div>
+    <button class="refresh-btn" onclick="loadData(true)">↻ 刷新</button>
+  </div>
 </header>
 
-<!-- Summary cards -->
-<div class="summary-bar">
-  <div class="card c-blue">
-    <div class="label">开发环境 NPU</div>
-    <div class="value" id="sum-devenv">—</div>
-    <div class="sub" id="sum-devenv-tasks">— 个实例</div>
+<!-- Top: 3 equal columns -->
+<div class="top-grid">
+
+  <!-- Col 1: 4 summary cards -->
+  <div class="cards-col">
+    <div class="s-card c-blue">
+      <div class="lbl">开发环境 NPU</div>
+      <div class="val" id="sum-devenv">—</div>
+      <div class="sub" id="sum-devenv-tasks">— 个实例</div>
+    </div>
+    <div class="s-card c-green">
+      <div class="lbl">训练作业 NPU</div>
+      <div class="val" id="sum-train">—</div>
+      <div class="sub" id="sum-train-tasks">— 个任务</div>
+    </div>
+    <div class="s-card c-orange">
+      <div class="lbl">推理服务 NPU</div>
+      <div class="val" id="sum-inference">—</div>
+      <div class="sub" id="sum-inference-tasks">— 个服务</div>
+    </div>
+    <div class="s-card c-red">
+      <div class="lbl">NPU 合计</div>
+      <div class="val" id="sum-total">—</div>
+      <div class="sub">全部资源占用</div>
+    </div>
   </div>
-  <div class="card c-green">
-    <div class="label">训练作业 NPU</div>
-    <div class="value" id="sum-train">—</div>
-    <div class="sub" id="sum-train-tasks">— 个任务</div>
+
+  <!-- Col 2: team totals bar chart -->
+  <div class="chart-box">
+    <div class="chart-title"><span class="icon">◈</span>各小组 NPU 占用（开发＋训练＋推理）</div>
+    <div class="echart" id="chart-leader-all"></div>
   </div>
-  <div class="card c-orange">
-    <div class="label">推理服务 NPU</div>
-    <div class="value" id="sum-inference">—</div>
-    <div class="sub" id="sum-inference-tasks">— 个服务</div>
+
+  <!-- Col 3: resource pool grouped bar -->
+  <div class="chart-box">
+    <div class="chart-title"><span class="icon">▦</span>各资源池 NPU 占用（开发 / 训练 / 推理）</div>
+    <div class="echart" id="chart-spec-all"></div>
   </div>
-  <div class="card c-red">
-    <div class="label">NPU 合计</div>
-    <div class="value" id="sum-total">—</div>
-    <div class="sub">全部资源占用</div>
-  </div>
+
 </div>
 
-<!-- Charts -->
-<div class="charts-row">
-  <div class="chart-box">
-    <h3>各资源池 NPU 占用（训练）</h3>
-    <div class="echart" id="chart-spec-train"></div>
-  </div>
-  <div class="chart-box">
-    <h3>各小组 NPU 占用分布（训练）</h3>
-    <div class="echart" id="chart-leader-train"></div>
-  </div>
-</div>
-
-<!-- Three panels -->
+<!-- Bottom: 3 detail panels -->
 <div class="panels">
-  <!-- 开发环境 -->
+
   <div class="panel" id="panel-devenv">
-    <div class="panel-header" onclick="togglePanel('devenv')">
-      <span class="dot" style="background:var(--accent)"></span>
+    <div class="panel-hdr" onclick="togglePanel('devenv')">
+      <span class="panel-icon">💻</span>
       <h2>开发环境</h2>
-      <span class="badge" id="badge-devenv">—</span>
+      <span class="panel-badge badge-blue" id="badge-devenv">—</span>
     </div>
-    <div id="body-devenv" style="overflow-x:auto">
-      <table class="tree-table">
-        <thead><tr>
-          <th style="width:38%">小组 / 成员 / 实例</th>
-          <th>NPU</th>
-          <th>时长(h)</th>
-          <th>规格</th>
-        </tr></thead>
-        <tbody id="tbody-devenv"></tbody>
-      </table>
-    </div>
+    <div id="body-devenv"><div id="list-devenv" class="leader-list"></div></div>
   </div>
 
-  <!-- 训练作业 -->
   <div class="panel" id="panel-train">
-    <div class="panel-header" onclick="togglePanel('train')">
-      <span class="dot" style="background:var(--accent2)"></span>
+    <div class="panel-hdr" onclick="togglePanel('train')">
+      <span class="panel-icon">🚀</span>
       <h2>训练作业</h2>
-      <span class="badge" id="badge-train">—</span>
+      <span class="panel-badge badge-green" id="badge-train">—</span>
     </div>
-    <div id="body-train" style="overflow-x:auto">
-      <table class="tree-table">
-        <thead><tr>
-          <th style="width:38%">小组 / 成员 / 任务</th>
-          <th>NPU</th>
-          <th>时长(h)</th>
-          <th>规格</th>
-        </tr></thead>
-        <tbody id="tbody-train"></tbody>
-      </table>
-    </div>
+    <div id="body-train"><div id="list-train" class="leader-list"></div></div>
   </div>
 
-  <!-- 推理服务 -->
   <div class="panel" id="panel-inference">
-    <div class="panel-header" onclick="togglePanel('inference')">
-      <span class="dot" style="background:var(--accent3)"></span>
+    <div class="panel-hdr" onclick="togglePanel('inference')">
+      <span class="panel-icon">⚡</span>
       <h2>推理服务</h2>
-      <span class="badge" id="badge-inference">—</span>
+      <span class="panel-badge badge-orange" id="badge-inference">—</span>
     </div>
-    <div id="body-inference" style="overflow-x:auto">
-      <table class="tree-table">
-        <thead><tr>
-          <th style="width:38%">小组 / 成员 / 服务</th>
-          <th>NPU</th>
-          <th>时长(h)</th>
-          <th>规格</th>
-        </tr></thead>
-        <tbody id="tbody-inference"></tbody>
-      </table>
-    </div>
+    <div id="body-inference"><div id="list-inference" class="leader-list"></div></div>
   </div>
+
 </div>
 
 <script>
+// ── Palette ───────────────────────────────────────────────
+const AVATAR_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
+const CHART_COLORS  = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
+
+function avatarColor(i){ return AVATAR_COLORS[i % AVATAR_COLORS.length] }
+function initials(name){ return name ? name[0] : '?' }
+
 // ── Charts ────────────────────────────────────────────────
-const COLORS = ['#4f8ef7','#36d9b0','#f7a94f','#f75f5f','#a78bfa','#34d399','#fbbf24','#60a5fa'];
+let _charts = {};
 
-function makeBarChart(elId, names, values, color) {
-  const chart = echarts.init(document.getElementById(elId), 'dark');
-  chart.setOption({
+function makeBarChart(elId, names, values) {
+  if (_charts[elId]) _charts[elId].dispose();
+  const c = echarts.init(document.getElementById(elId));
+  _charts[elId] = c;
+  c.setOption({
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 12, right: 12, top: 8, bottom: 4, containLabel: true },
-    xAxis: { type: 'value', splitLine: { lineStyle: { color: '#2e3347' } } },
-    yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11 } },
-    series: [{ type: 'bar', data: values, itemStyle: { color }, barMaxWidth: 18 }],
-  });
-  window.addEventListener('resize', () => chart.resize());
-}
-
-function makePieChart(elId, seriesData) {
-  const chart = echarts.init(document.getElementById(elId), 'dark');
-  chart.setOption({
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'item', formatter: '{b}: {c} NPU ({d}%)' },
-    legend: { orient: 'vertical', right: 0, top: 'center', textStyle: { fontSize: 11 } },
-    color: COLORS,
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
+      textStyle: { color: '#e2e8f0', fontSize: 13 },
+    },
+    grid: { left: 8, right: 16, top: 6, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } },
+      axisLabel: { color: '#64748b', fontSize: 12 },
+    },
+    yAxis: {
+      type: 'category', data: names,
+      axisLabel: { color: '#94a3b8', fontSize: 12 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } },
+    },
     series: [{
-      type: 'pie', radius: ['40%', '68%'], center: ['38%', '50%'],
-      data: seriesData,
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 12 } },
+      type: 'bar', data: values, barMaxWidth: 18,
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(1,0,0,0,[
+          { offset: 0, color: '#3b82f6' },
+          { offset: 1, color: '#06b6d4' },
+        ]),
+        borderRadius: [0, 4, 4, 0],
+      },
     }],
   });
-  window.addEventListener('resize', () => chart.resize());
+  setTimeout(() => c.resize(), 0);
+  window.addEventListener('resize', () => c.resize());
 }
 
-// ── Tree table renderer ───────────────────────────────────
-let _maxGpu = {};
+function makeGroupedBarChart(elId, specs, seriesArr) {
+  if (_charts[elId]) _charts[elId].dispose();
+  const c = echarts.init(document.getElementById(elId));
+  _charts[elId] = c;
+  c.setOption({
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
+      textStyle: { color: '#e2e8f0', fontSize: 13 },
+    },
+    legend: {
+      top: 0, right: 0, itemWidth: 10, itemHeight: 10,
+      textStyle: { color: '#94a3b8', fontSize: 12 },
+    },
+    grid: { left: 8, right: 16, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } },
+      axisLabel: { color: '#64748b', fontSize: 12 },
+    },
+    yAxis: {
+      type: 'category', data: specs,
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } },
+    },
+    series: seriesArr.map(s => ({
+      name: s.name, type: 'bar', data: s.data, barMaxWidth: 12,
+      itemStyle: { color: s.color, borderRadius: [0,3,3,0] },
+    })),
+  });
+  setTimeout(() => c.resize(), 0);
+  window.addEventListener('resize', () => c.resize());
+}
 
-function renderTable(type, userData) {
-  const tbody = document.getElementById(`tbody-${type}`);
+// ── Leader card renderer ──────────────────────────────────
+function renderPanel(type, userData) {
+  const list = document.getElementById(`list-${type}`);
   if (!userData || Object.keys(userData).length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="empty-tip">暂无数据</td></tr>`;
-    return;
+    list.innerHTML = `<div class="empty-tip">暂无数据</div>`;
+    return { totalGpu: 0, totalTasks: 0 };
   }
-
-  // 计算最大 gpu 用于进度条比例
-  _maxGpu[type] = Math.max(...Object.values(userData).map(l => l.gpu_num), 1);
 
   let totalGpu = 0, totalTasks = 0;
   const sorted = Object.entries(userData).sort((a, b) => b[1].gpu_num - a[1].gpu_num);
 
-  let html = '';
-  sorted.forEach(([leader, ld], li) => {
-    totalGpu += ld.gpu_num;
+  list.innerHTML = sorted.map(([leader, ld], li) => {
+    totalGpu   += ld.gpu_num;
     totalTasks += ld.task_count;
-    const barW = Math.round(ld.gpu_num / _maxGpu[type] * 80);
-    html += `
-<tr class="row-leader" onclick="toggleLeader(this,'leader-${type}-${li}')">
-  <td><span class="toggle">▶</span>${leader}</td>
-  <td><span class="gpu-bar" style="width:${barW}px"></span>${ld.gpu_num}</td>
-  <td>${ld.max_duration}h</td>
-  <td>${ld.task_count} 个</td>
-</tr>`;
+    const memberCount = Object.keys(ld.members).length;
+    const memSorted = Object.entries(ld.members).sort((a,b) => b[1].gpu_num - a[1].gpu_num);
+    const color = avatarColor(li);
 
-    const memSorted = Object.entries(ld.members).sort((a, b) => b[1].gpu_num - a[1].gpu_num);
-    html += `<tr class="member-group" id="leader-${type}-${li}"><td colspan="4" style="padding:0">
-<table class="tree-table" style="border:none">`;
-    memSorted.forEach(([member, md], mi) => {
-      html += `
-<tr class="row-member" onclick="toggleMember(this,'member-${type}-${li}-${mi}')">
-  <td><span class="toggle">▶</span>${member}</td>
-  <td>${md.gpu_num}</td>
-  <td>${md.max_duration}h</td>
-  <td>${md.task_count} 个</td>
-</tr>`;
-      md.tasks.forEach((t, ti) => {
-        html += `
-<tr class="row-task" id="member-${type}-${li}-${mi}-${ti}">
-  <td title="${t.task_name}">${t.task_name}</td>
-  <td>${t.gpu_num}</td>
-  <td>${t.duration}h</td>
-  <td title="${t.spec_name}">${t.spec_name}</td>
-</tr>`;
-      });
-    });
-    html += `</table></td></tr>`;
-  });
+    const memberCards = memSorted.map(([member, md], mi) => {
+      const taskRows = md.tasks.map(t => `
+        <div class="task-row">
+          <span class="task-name" title="${t.task_name}">${t.task_name}</span>
+          <span class="task-gpu">${t.gpu_num} NPU</span>
+          <span class="task-dur">${t.duration}h</span>
+          <span class="task-spec" title="${t.spec_name}">${t.spec_name}</span>
+        </div>`).join('');
 
-  tbody.innerHTML = html;
+      return `
+      <div class="member-card" id="mc-${type}-${li}-${mi}">
+        <div class="member-row" onclick="toggleMemberCard('mc-${type}-${li}-${mi}')">
+          <span class="expand-btn">▶</span>
+          <div class="m-avatar" style="background:${color}22;color:${color}">${initials(member)}</div>
+          <span class="member-name" title="${member}">${member}</span>
+          <div class="member-stats">
+            <div class="stat-item"><div class="stat-lbl">NPU</div><div class="stat-val stat-npu">${md.gpu_num}</div></div>
+            <div class="stat-item"><div class="stat-lbl">任务</div><div class="stat-val stat-task">${md.task_count}</div></div>
+            <div class="stat-item"><div class="stat-lbl">最长</div><div class="stat-val stat-dur">${md.max_duration}h</div></div>
+          </div>
+        </div>
+        <div class="task-list">${taskRows}</div>
+      </div>`;
+    }).join('');
+
+    return `
+    <div class="leader-card" id="lc-${type}-${li}">
+      <div class="leader-row" onclick="toggleLeaderCard('lc-${type}-${li}')">
+        <span class="expand-btn">▶</span>
+        <div class="avatar" style="background:linear-gradient(135deg,${color},${color}99)">${initials(leader)}</div>
+        <div class="leader-info">
+          <div class="leader-name" title="${leader}">${leader}</div>
+          <div class="leader-meta">${memberCount} 位组员</div>
+        </div>
+        <div class="leader-stats">
+          <div class="stat-item"><div class="stat-lbl">总 NPU</div><div class="stat-val stat-npu">${ld.gpu_num}</div></div>
+          <div class="stat-item"><div class="stat-lbl">总任务</div><div class="stat-val stat-task">${ld.task_count}</div></div>
+          <div class="stat-item"><div class="stat-lbl">最长任务</div><div class="stat-val stat-dur">${ld.max_duration}h</div></div>
+        </div>
+        <div class="leader-badge">★ Leader</div>
+      </div>
+      <div class="member-list">${memberCards}</div>
+    </div>`;
+  }).join('');
+
   return { totalGpu, totalTasks };
 }
 
-// ── Toggle helpers ────────────────────────────────────────
-function toggleLeader(row, groupId) {
-  row.classList.toggle('open');
-  const group = document.getElementById(groupId);
-  group.classList.toggle('visible');
+function toggleLeaderCard(id) {
+  document.getElementById(id).classList.toggle('open');
 }
-
-function toggleMember(row, memberId) {
-  row.classList.toggle('open');
-  // tasks share the memberId prefix
-  document.querySelectorAll(`[id^="${memberId}-"]`).forEach(el => {
-    el.classList.toggle('visible');
-  });
+function toggleMemberCard(id) {
+  document.getElementById(id).classList.toggle('open');
 }
-
 function togglePanel(type) {
   const body = document.getElementById(`body-${type}`);
   body.style.display = body.style.display === 'none' ? '' : 'none';
 }
 
-// ── Main data loader ──────────────────────────────────────
+// ── Main loader ───────────────────────────────────────────
 function loadData(force) {
-  const loading = document.getElementById('loading');
-  loading.style.display = 'flex';
+  document.getElementById('loading').style.display = 'flex';
 
   fetch('/data' + (force ? '?force=1' : ''))
     .then(r => r.json())
     .then(data => {
       document.getElementById('update-time').textContent = data.update_time;
 
-      // Render each section
-      const sections = { devenv: '开发环境', train: '训练作业', inference: '推理服务' };
       let grandTotal = 0;
+      const labels = { devenv: '实例', train: '任务', inference: '服务' };
 
-      Object.keys(sections).forEach(type => {
-        const section = data[type] || {};
-        const userData = section.user_data || {};
-        const specData = section.spec_data || {};
-
-        const result = renderTable(type, userData);
-        const totalGpu   = result ? result.totalGpu   : 0;
-        const totalTasks = result ? result.totalTasks  : 0;
+      ['devenv', 'train', 'inference'].forEach(type => {
+        const { totalGpu, totalTasks } = renderPanel(type, (data[type] || {}).user_data || {});
         grandTotal += totalGpu;
-
-        document.getElementById(`sum-${type}`).textContent = totalGpu;
-        const subEl = document.getElementById(`sum-${type}-tasks`);
-        if (subEl) subEl.textContent = `${totalTasks} 个${type === 'train' ? '任务' : type === 'inference' ? '服务' : '实例'}`;
-        document.getElementById(`badge-${type}`).textContent = `${totalGpu} NPU · ${totalTasks} 个`;
+        document.getElementById(`sum-${type}`).textContent       = totalGpu;
+        document.getElementById(`sum-${type}-tasks`).textContent = `${totalTasks} 个${labels[type]}`;
+        document.getElementById(`badge-${type}`).textContent     = `${totalGpu} NPU · ${totalTasks} 个`;
       });
-
       document.getElementById('sum-total').textContent = grandTotal;
 
-      // Charts for train
-      const trainSpec  = (data.train || {}).spec_data  || {};
-      const trainUsers = (data.train || {}).user_data  || {};
+      // Team totals bar chart
+      const leaderTotals = {};
+      ['devenv','train','inference'].forEach(type => {
+        Object.entries((data[type]||{}).user_data||{}).forEach(([l,ld]) => {
+          leaderTotals[l] = (leaderTotals[l]||0) + ld.gpu_num;
+        });
+      });
+      const le = Object.entries(leaderTotals).sort((a,b)=>b[1]-a[1]).slice(0,15);
+      makeBarChart('chart-leader-all', le.map(e=>e[0]), le.map(e=>e[1]));
 
-      const specEntries   = Object.entries(trainSpec).sort((a, b) => b[1] - a[1]).slice(0, 12);
-      const leaderEntries = Object.entries(trainUsers)
-        .map(([k, v]) => [k, v.gpu_num])
-        .sort((a, b) => b[1] - a[1]).slice(0, 10);
-
-      makeBarChart('chart-spec-train',
-        specEntries.map(e => e[0]), specEntries.map(e => e[1]), '#4f8ef7');
-
-      makePieChart('chart-leader-train',
-        leaderEntries.map(([name, val]) => ({ name, value: val })));
+      // Resource pool grouped bar chart
+      const specMap = {devenv:{},train:{},inference:{}};
+      const allSpecs = new Set();
+      ['devenv','train','inference'].forEach(type => {
+        Object.entries((data[type]||{}).spec_data||{}).forEach(([s,v]) => {
+          specMap[type][s] = v; allSpecs.add(s);
+        });
+      });
+      const sortedSpecs = [...allSpecs]
+        .map(s => [s,(specMap.devenv[s]||0)+(specMap.train[s]||0)+(specMap.inference[s]||0)])
+        .sort((a,b)=>b[1]-a[1]).slice(0,12).map(e=>e[0]);
+      makeGroupedBarChart('chart-spec-all', sortedSpecs, [
+        { name:'开发环境', color:'#3b82f6', data: sortedSpecs.map(s=>specMap.devenv[s]||0) },
+        { name:'训练作业', color:'#10b981', data: sortedSpecs.map(s=>specMap.train[s]||0) },
+        { name:'推理服务', color:'#f59e0b', data: sortedSpecs.map(s=>specMap.inference[s]||0) },
+      ]);
     })
-    .catch(err => {
-      console.error(err);
-      alert('数据加载失败，请检查后端服务');
-    })
-    .finally(() => { loading.style.display = 'none'; });
+    .catch(err => { console.error(err); alert('数据加载失败，请检查后端服务'); })
+    .finally(() => { document.getElementById('loading').style.display = 'none'; });
 }
 
-// Auto-refresh every 5 minutes
 loadData(false);
 setInterval(() => loadData(false), 300_000);
 </script>

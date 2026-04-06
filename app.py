@@ -67,11 +67,12 @@ def get_first_letter(text):
 def _parse_member_key(s):
     """将 Excel 成员单元格解析为 (key, mid)，key 与 API 返回的 user_id 格式匹配。
 
-    支持的格式：
+    API user_id 格式统一为：姓名拼音首字母 + 工号/ID
       "Wang Tingkuo 84442956"  → ("w84442956",  "84442956")  英文拼音名+纯数字工号
       "Zhang Zhi 84413741"     → ("z84413741",  "84413741")
       "范诗卿 00934895"        → ("f00934895",  "00934895")  中文名+空格+纯数字工号
-      "李媚 wx1209009"         → ("wx1209009",  "x1209009")  中文名+空格+字母数字ID
+      "李媚 wx1209009"         → ("lwx1209009", "wx1209009") 中文名+空格+字母数字ID
+                                  （API返回 l+wx1209009，l为李的拼音首字母）
       "w00910350"              → ("w00910350",  "00910350")  纯ID（字母前缀）
       "张某某84434546"         → ("z84434546",  "84434546")  旧格式：中文名直连数字
     """
@@ -80,16 +81,10 @@ def _parse_member_key(s):
     if len(parts) >= 2:
         id_part = parts[-1]
         name_part = ' '.join(parts[:-1])
-
-        if re.match(r'^\d+$', id_part):
-            # 纯数字工号：API user_id = 姓名拼音首字母 + 数字
-            first = get_first_letter(name_part)
-            key = first + id_part
-            mid = id_part
-        else:
-            # 字母开头的混合ID（如 wx1209009）：本身就是 API user_id，直接用
-            key = id_part.lower()
-            mid = key[1:] if len(key) > 1 else ''
+        # 无论工号是纯数字还是字母数字混合，API 格式均为：姓名拼音首字母 + 工号
+        first = get_first_letter(name_part)
+        key = (first + id_part).lower()
+        mid = id_part.lower()   # 去掉首字母后的部分，用于 resolve_user 的 stripped 查找
         return key, mid
 
     # 单 token（无空格）
@@ -122,6 +117,14 @@ for col in capability_columns:
     leader = str(raw_leader).strip() if pd.notna(raw_leader) else ''
     if leader in ('nan', ''):
         leader = col
+
+    # 将组长自身也注册到字典：组长可能自己也有任务，需归入本组统计
+    lkey, lmid = _parse_member_key(leader)
+    if lkey:
+        _store(lkey, leader, leader)
+    if lmid and lmid != lkey:
+        _store(lmid, leader, leader)
+
     for member in df[col].iloc[1:]:
         if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
             s = str(member).strip()

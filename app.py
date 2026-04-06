@@ -64,25 +64,47 @@ def get_first_letter(text):
     return lazy_pinyin(c)[0][0].lower() if '\u4e00' <= c <= '\u9fff' else c.lower()
 
 
-def extract_id(text):
-    """从 Excel 单元格中提取可用于匹配的 ID 部分。
-    两种格式：
-      1. 中文姓名+纯数字工号，如 "张某某84434546" → 提取纯数字 "84434546"
-         （配合 get_first_letter 得到 key = "z84434546"，匹配 API 的 "z84434546"）
-      2. 纯字母数字 ID，如 "wabc123" → 去掉首字母得 "abc123"
+def _parse_member_key(s):
+    """将 Excel 成员单元格解析为 (key, mid)，key 与 API 返回的 user_id 格式匹配。
+
+    支持的格式：
+      "Wang Tingkuo 84442956"  → ("w84442956",  "84442956")  英文拼音名+纯数字工号
+      "Zhang Zhi 84413741"     → ("z84413741",  "84413741")
+      "范诗卿 00934895"        → ("f00934895",  "00934895")  中文名+空格+纯数字工号
+      "李媚 wx1209009"         → ("wx1209009",  "x1209009")  中文名+空格+字母数字ID
+      "w00910350"              → ("w00910350",  "00910350")  纯ID（字母前缀）
+      "张某某84434546"         → ("z84434546",  "84434546")  旧格式：中文名直连数字
     """
-    s = str(text).strip()
-    if not s:
-        return s
-    if '\u4e00' <= s[0] <= '\u9fff':
-        # 以汉字开头：提取字符串中全部数字，去除中文和符号
+    parts = s.split()
+
+    if len(parts) >= 2:
+        id_part = parts[-1]
+        name_part = ' '.join(parts[:-1])
+
+        if re.match(r'^\d+$', id_part):
+            # 纯数字工号：API user_id = 姓名拼音首字母 + 数字
+            first = get_first_letter(name_part)
+            key = first + id_part
+            mid = id_part
+        else:
+            # 字母开头的混合ID（如 wx1209009）：本身就是 API user_id，直接用
+            key = id_part.lower()
+            mid = key[1:] if len(key) > 1 else ''
+        return key, mid
+
+    # 单 token（无空格）
+    if s and '\u4e00' <= s[0] <= '\u9fff':
+        # 中文打头：提取全部数字（兼容"张某某84434546"旧格式）
         digits = re.sub(r'[^\d]', '', s)
-        return digits if digits else s
-    elif s[0].isalpha():
-        # 以字母开头的 ID（可含字母数字混合）：去掉首字母前缀
-        return s[1:]
+        first = get_first_letter(s)
+        return (first + digits, digits) if digits else (first, '')
+    elif s and s[0].isalpha():
+        # 字母打头 ID（如 w00910350）
+        k = s.lower()
+        return k, k[1:]
     else:
-        return s
+        k = s.lower()
+        return k, k
 
 
 def _store(key, name, leader):
@@ -91,7 +113,7 @@ def _store(key, name, leader):
     if not k:
         return
     usr_name_dict[k] = name
-    if leader:                  # 只在 leader 非空时存入，避免空串覆盖
+    if leader:
         usr_dict[k] = leader
 
 
@@ -99,18 +121,17 @@ for col in capability_columns:
     raw_leader = df[col].iloc[0]
     leader = str(raw_leader).strip() if pd.notna(raw_leader) else ''
     if leader in ('nan', ''):
-        leader = col            # 用列名作为降级 leader 名
+        leader = col
     for member in df[col].iloc[1:]:
         if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
             s = str(member).strip()
-            mid = extract_id(s)
-            key = f'{get_first_letter(s)}{mid}' if mid else get_first_letter(s)
-            _store(key, s, leader)  # 完整 key
-            if mid:
-                _store(mid, s, leader)  # 纯 mid（去掉前缀）
+            key, mid = _parse_member_key(s)
+            _store(key, s, leader)
+            if mid and mid != key:
+                _store(mid, s, leader)
 
 print(f"[花名册] 共加载 {len(usr_dict)} 个用户ID → 组长映射，"
-      f"示例：{list(usr_dict.items())[:3]}")
+      f"示例：{list(usr_dict.items())[:5]}")
 
 
 # ── 通用：用户信息查找 ────────────────────────────────────

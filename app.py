@@ -65,9 +65,24 @@ def get_first_letter(text):
 
 
 def extract_id(text):
-    """去掉首个字母前缀，保留其余所有内容（含字母数字混合ID）。"""
+    """从 Excel 单元格中提取可用于匹配的 ID 部分。
+    两种格式：
+      1. 中文姓名+纯数字工号，如 "张某某84434546" → 提取纯数字 "84434546"
+         （配合 get_first_letter 得到 key = "z84434546"，匹配 API 的 "z84434546"）
+      2. 纯字母数字 ID，如 "wabc123" → 去掉首字母得 "abc123"
+    """
     s = str(text).strip()
-    return s[1:] if s and s[0].isalpha() else s
+    if not s:
+        return s
+    if '\u4e00' <= s[0] <= '\u9fff':
+        # 以汉字开头：提取字符串中全部数字，去除中文和符号
+        digits = re.sub(r'[^\d]', '', s)
+        return digits if digits else s
+    elif s[0].isalpha():
+        # 以字母开头的 ID（可含字母数字混合）：去掉首字母前缀
+        return s[1:]
+    else:
+        return s
 
 
 def _store(key, name, leader):

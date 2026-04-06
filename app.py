@@ -54,6 +54,7 @@ capability_columns = df.columns[1:-2].tolist()
 
 usr_dict = {}       # key (lowercase) → leader
 usr_name_dict = {}  # key (lowercase) → 用户全名
+quota_dict = {}     # leader_name → 配额NPU卡数
 
 
 def get_first_letter(text):
@@ -118,6 +119,16 @@ for col in capability_columns:
     if leader in ('nan', ''):
         leader = col
 
+    # 读取配额（第三行 = iloc[1]，第二行已是组长名）
+    if len(df) > 1:
+        raw_quota = df[col].iloc[1]
+        try:
+            q = int(float(str(raw_quota))) if pd.notna(raw_quota) else 0
+        except (ValueError, TypeError):
+            q = 0
+        if q > 0:
+            quota_dict[leader] = q
+
     # 将组长自身也注册到字典：组长可能自己也有任务，需归入本组统计
     lkey, lmid = _parse_member_key(leader)
     if lkey:
@@ -125,7 +136,8 @@ for col in capability_columns:
     if lmid and lmid != lkey:
         _store(lmid, leader, leader)
 
-    for member in df[col].iloc[1:]:
+    # 成员从第四行开始（iloc[2:]，跳过组长行和配额行）
+    for member in df[col].iloc[2:]:
         if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
             s = str(member).strip()
             key, mid = _parse_member_key(s)
@@ -550,6 +562,7 @@ def get_data():
         "train":     d["train"],
         "devenv":    d["devenv"],
         "inference": d["inference"],
+        "quotas":    quota_dict,
         "update_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(d["last_update"])),
     })
 

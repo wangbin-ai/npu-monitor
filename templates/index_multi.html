@@ -103,6 +103,45 @@ header h1 em{
 .cbox-title .icon{font-size:16px}
 .cbox .echart{flex:1;min-height:280px;width:100%}
 
+/* ── quota list ── */
+#quota-list{overflow-y:auto;max-height:340px;padding:0 2px}
+#quota-list::-webkit-scrollbar{width:4px}
+#quota-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+.ql-item{
+  padding:9px 6px 10px;border-bottom:1px solid rgba(255,255,255,.04);
+  transition:background .18s;border-radius:8px;
+}
+.ql-item:last-child{border-bottom:none}
+.ql-item:hover{background:rgba(255,255,255,.03)}
+.ql-item.is-over{background:rgba(239,68,68,.04)}
+.ql-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px}
+.ql-name{font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.ql-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.ql-used{font-size:13px;font-weight:700}
+.ql-sep{color:var(--text2);font-size:12px}
+.ql-quota-num{font-size:12px;color:var(--text2)}
+.ql-over-badge{
+  font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;
+  background:rgba(239,68,68,.18);color:#f87171;letter-spacing:.4px;
+}
+.over-badge-hdr{
+  font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;
+  background:rgba(239,68,68,.18);color:#f87171;
+}
+.ql-track{
+  height:5px;border-radius:3px;background:rgba(255,255,255,.06);
+  position:relative;overflow:visible;
+}
+.ql-fill{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.4,0,.2,1)}
+.ql-marker{
+  position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;
+  background:rgba(255,255,255,.3);pointer-events:none;
+}
+.ql-footer{
+  display:flex;justify-content:space-between;
+  font-size:10px;color:var(--text2);margin-top:4px;
+}
+
 /* ── Row 3: detail section ── */
 .detail-wrap{padding:14px 28px 28px}
 .detail-hdr{
@@ -282,9 +321,10 @@ header h1 em{
 <div class="charts-row">
   <div class="cbox">
     <div class="cbox-hdr">
-      <div class="cbox-title"><span class="icon">◈</span>各小组 NPU 占用分布</div>
+      <div class="cbox-title"><span class="icon">◈</span>各小组 NPU 占用 / 配额</div>
+      <span id="quota-over-count" style="display:none" class="over-badge-hdr"></span>
     </div>
-    <div class="echart" id="chart-donut"></div>
+    <div id="quota-list"></div>
   </div>
   <div class="cbox">
     <div class="cbox-hdr">
@@ -310,41 +350,75 @@ header h1 em{
 const PAL = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#ef4444','#84cc16','#f97316','#a78bfa'];
 let _charts = {};
 
-/* ── charts ── */
-function initDonut(leaders) {
-  const el = document.getElementById('chart-donut');
-  if (_charts.donut) _charts.donut.dispose();
-  const c = echarts.init(el);
-  _charts.donut = c;
-  const top8 = leaders.slice(0, 8);
-  const others = leaders.slice(8).reduce((s, l) => s + l[1], 0);
-  const seriesData = top8.map((l, i) => ({ name: l[0], value: l[1], itemStyle: { color: PAL[i] } }));
-  if (others > 0) seriesData.push({ name: '其他Leader', value: others, itemStyle: { color: '#475569' } });
-  c.setOption({
-    backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'item', formatter: '{b}: {c} NPU ({d}%)',
-      backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
-      textStyle: { color: '#e2e8f0', fontSize: 13 },
-    },
-    legend: {
-      orient: 'vertical', right: 10, top: 'center',
-      textStyle: { color: '#94a3b8', fontSize: 12 },
-      formatter: n => n.length > 14 ? n.slice(0, 14) + '…' : n,
-    },
-    series: [{
-      type: 'pie', radius: ['42%', '68%'], center: ['36%', '50%'],
-      data: seriesData,
-      label: { show: false },
-      emphasis: {
-        label: { show: true, fontSize: 13, fontWeight: 700 },
-        itemStyle: { shadowBlur: 20, shadowColor: 'rgba(0,0,0,.5)' },
-      },
-      itemStyle: { borderRadius: 4, borderWidth: 2, borderColor: 'rgba(8,12,20,.6)' },
-    }],
+/* ── quota list ── */
+function renderQuotaList(leaderMap, quotas) {
+  const el = document.getElementById('quota-list');
+  if (!leaderMap.length) { el.innerHTML = '<div class="empty-tip">暂无数据</div>'; return; }
+
+  const hasQuota = Object.keys(quotas).length > 0;
+  // 缩放基准：已用和配额中的最大值
+  const maxVal = Math.max(1,
+    ...leaderMap.map(([,ld]) => ld.gpu_num),
+    ...(hasQuota ? leaderMap.map(([l]) => quotas[l] || 0) : [0])
+  );
+
+  let overCount = 0;
+  const rows = leaderMap.map(([leader, ld], i) => {
+    const used   = ld.gpu_num;
+    const quota  = quotas[leader] || 0;
+    const isOver = quota > 0 && used > quota;
+    const overAmt = isOver ? used - quota : 0;
+    if (isOver) overCount++;
+
+    // 进度条宽度百分比（相对于 maxVal）
+    const usedPct  = (used  / maxVal * 100).toFixed(1);
+    const quotaPct = quota > 0 ? (quota / maxVal * 100).toFixed(1) : null;
+
+    // 颜色：超额→红，接近配额（>80%）→橙，正常→调色板
+    let fillColor, usedColor;
+    if (isOver) {
+      fillColor = 'linear-gradient(90deg,rgba(239,68,68,.5),rgba(239,68,68,.85))';
+      usedColor = '#f87171';
+    } else if (quota > 0 && used / quota > 0.8) {
+      fillColor = 'linear-gradient(90deg,rgba(245,158,11,.4),rgba(245,158,11,.8))';
+      usedColor = '#fbbf24';
+    } else {
+      const c = PAL[i % PAL.length];
+      fillColor = `linear-gradient(90deg,${c}55,${c}cc)`;
+      usedColor = c;
+    }
+
+    const shortName = leader.length > 14 ? leader.slice(0,14)+'…' : leader;
+    const pctLabel  = quota > 0 ? `${Math.round(used/quota*100)}%` : '';
+
+    return `
+    <div class="ql-item${isOver ? ' is-over' : ''}">
+      <div class="ql-head">
+        <span class="ql-name" title="${leader}">${shortName}</span>
+        <div class="ql-right">
+          <span class="ql-used" style="color:${usedColor}">${used}</span>
+          ${quota > 0 ? `<span class="ql-sep">/</span><span class="ql-quota-num">${quota}</span>` : ''}
+          ${isOver ? `<span class="ql-over-badge">+${overAmt} 超额</span>` : ''}
+        </div>
+      </div>
+      <div class="ql-track">
+        <div class="ql-fill" style="width:${usedPct}%;background:${fillColor}"></div>
+        ${quotaPct !== null ? `<div class="ql-marker" style="left:${quotaPct}%"></div>` : ''}
+      </div>
+      ${quota > 0 ? `<div class="ql-footer"><span></span><span>${pctLabel} 使用率</span></div>` : ''}
+    </div>`;
   });
-  setTimeout(() => c.resize(), 0);
-  window.addEventListener('resize', () => c.resize());
+
+  el.innerHTML = rows.join('');
+
+  // 顶部超额统计徽章
+  const badge = document.getElementById('quota-over-count');
+  if (overCount > 0) {
+    badge.textContent = `${overCount} 组超额`;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 function initTeamChart(leaderMap) {
@@ -542,9 +616,9 @@ function loadData(force) {
       document.getElementById('sub-train').textContent    = `${counts.train} 个${labels.train}`;
       document.getElementById('sub-inference').textContent = `${counts.inference} 个${labels.inference}`;
 
-      // donut: per-leader totals
+      // quota list + team chart (both use leaderMap)
       const leaderMap = buildLeaderMap(data);
-      initDonut(leaderMap.map(([l,ld]) => [l, ld.gpu_num]));
+      renderQuotaList(leaderMap, data.quotas || {});
 
       // team stacked chart (reuse leaderMap)
       initTeamChart(leaderMap);

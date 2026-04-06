@@ -555,9 +555,22 @@ def get_data():
 
 
 if __name__ == '__main__':
-    import socket
-    PORT = 5063
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex(('127.0.0.1', PORT)) == 0:
+    import sys, socket
+    PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5063
+
+    # 检测端口占用
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _chk:
+        if _chk.connect_ex(('127.0.0.1', PORT)) == 0:
             raise SystemExit(f"[ERROR] 端口 {PORT} 已被占用，请先停止旧进程（lsof -i :{PORT}）")
+
+    # 获取本机局域网 IP
+    try:
+        _tmp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _tmp.connect(('8.8.8.8', 80))
+        LOCAL_IP = _tmp.getsockname()[0]
+        _tmp.close()
+    except Exception:
+        LOCAL_IP = '127.0.0.1'
+
+    print(f"[服务] 访问地址：http://{LOCAL_IP}:{PORT}")
     app.run(host='0.0.0.0', port=PORT, debug=False)

@@ -53,9 +53,12 @@ header h1 em{
 .sc{
   background:var(--card);border:1px solid var(--border);border-radius:var(--r);
   padding:18px 20px 16px;position:relative;overflow:hidden;
-  transition:border-color .2s,box-shadow .2s;cursor:default;
+  transition:border-color .22s,box-shadow .22s;cursor:default;
 }
-.sc:hover{border-color:var(--border-hi)}
+.sc.blue:hover  {border-color:var(--blue);  box-shadow:0 0 0 1px var(--blue),  0 0 28px color-mix(in srgb,var(--blue)   30%,transparent)}
+.sc.green:hover {border-color:var(--green); box-shadow:0 0 0 1px var(--green), 0 0 28px color-mix(in srgb,var(--green)  30%,transparent)}
+.sc.orange:hover{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange),0 0 28px color-mix(in srgb,var(--orange) 30%,transparent)}
+.sc.red:hover   {border-color:var(--purple);box-shadow:0 0 0 1px var(--purple),0 0 28px color-mix(in srgb,var(--purple) 30%,transparent)}
 .sc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
 .sc-label{font-size:11px;color:var(--text2);letter-spacing:.8px;text-transform:uppercase;font-weight:600}
 .sc-icon{
@@ -89,7 +92,9 @@ header h1 em{
   background:var(--card);border:1px solid var(--border);
   border-radius:var(--r);padding:20px 20px 16px;
   display:flex;flex-direction:column;
+  transition:border-color .22s,box-shadow .22s;
 }
+.cbox:hover{border-color:rgba(99,102,241,.45);box-shadow:0 0 0 1px rgba(99,102,241,.2),0 0 28px rgba(99,102,241,.1)}
 .cbox-hdr{
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:14px;flex-shrink:0;
@@ -283,7 +288,7 @@ header h1 em{
   </div>
   <div class="cbox">
     <div class="cbox-hdr">
-      <div class="cbox-title"><span class="icon">▦</span>各资源池 NPU 占用（开发 / 训练 / 推理）</div>
+      <div class="cbox-title"><span class="icon">▦</span>各小组 NPU 占用（开发 / 训练 / 推理）</div>
     </div>
     <div class="echart" id="chart-spec"></div>
   </div>
@@ -342,38 +347,69 @@ function initDonut(leaders) {
   window.addEventListener('resize', () => c.resize());
 }
 
-function initSpecChart(specMap) {
+function initTeamChart(leaderMap) {
   const el = document.getElementById('chart-spec');
   if (_charts.spec) _charts.spec.dispose();
   const c = echarts.init(el);
   _charts.spec = c;
-  const allSpecs = new Set();
-  ['devenv','train','inference'].forEach(t => Object.keys(specMap[t]||{}).forEach(s => allSpecs.add(s)));
-  const specs = [...allSpecs]
-    .map(s => [s, (specMap.devenv[s]||0)+(specMap.train[s]||0)+(specMap.inference[s]||0)])
-    .sort((a,b)=>b[1]-a[1]).slice(0,12).map(e=>e[0]);
+
+  // 取前12个小组，倒序排列让最大值在顶部
+  const top = leaderMap.slice(0, 12).reverse();
+  const names  = top.map(([l]) => l.length > 8 ? l.slice(0,8)+'…' : l);
+  const fullNames = top.map(([l]) => l);
+  const devData   = top.map(([,ld]) => (ld.types.devenv   || {gpu_num:0}).gpu_num);
+  const trainData = top.map(([,ld]) => (ld.types.train    || {gpu_num:0}).gpu_num);
+  const inferData = top.map(([,ld]) => (ld.types.inference|| {gpu_num:0}).gpu_num);
+
   c.setOption({
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
       textStyle: { color: '#e2e8f0', fontSize: 12 },
+      formatter(params) {
+        const i = params[0].dataIndex;
+        const rows = params.filter(p=>p.value>0)
+          .map(p=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:5px"></span>${p.seriesName}: <b>${p.value}</b>`).join('<br>');
+        const total = devData[i]+trainData[i]+inferData[i];
+        return `<div style="font-weight:700;margin-bottom:6px">${fullNames[i]}</div>${rows}<hr style="border-color:rgba(255,255,255,.1);margin:6px 0"><span style="color:#94a3b8">合计:</span> <b style="color:#fff">${total} NPU</b>`;
+      },
     },
-    legend: { top: 0, right: 0, textStyle: { color: '#94a3b8', fontSize: 12 }, itemWidth: 10, itemHeight: 10 },
-    grid: { left: 8, right: 14, top: 28, bottom: 4, containLabel: true },
+    legend: {
+      top: 0, right: 0,
+      textStyle: { color: '#94a3b8', fontSize: 12 }, itemWidth: 10, itemHeight: 10,
+    },
+    grid: { left: 8, right: 16, top: 28, bottom: 4, containLabel: true },
     xAxis: {
-      type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
+      type: 'value',
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
       axisLabel: { color: '#64748b', fontSize: 11 },
     },
     yAxis: {
-      type: 'category', data: specs,
-      axisLabel: { color: '#94a3b8', fontSize: 10 },
+      type: 'category', data: names,
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
       axisLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
     },
     series: [
-      { name:'开发环境', type:'bar', data: specs.map(s=>specMap.devenv[s]||0), itemStyle:{color:'#3b82f6',borderRadius:[0,3,3,0]}, barMaxWidth:12 },
-      { name:'训练作业', type:'bar', data: specs.map(s=>specMap.train[s]||0),  itemStyle:{color:'#10b981',borderRadius:[0,3,3,0]}, barMaxWidth:12 },
-      { name:'推理服务', type:'bar', data: specs.map(s=>specMap.inference[s]||0), itemStyle:{color:'#f59e0b',borderRadius:[0,3,3,0]}, barMaxWidth:12 },
+      {
+        name: '开发环境', type: 'bar', stack: 'total', data: devData,
+        itemStyle: { color: '#3b82f6' },
+        emphasis: { itemStyle: { color: '#60a5fa' } },
+        barMaxWidth: 20,
+        label: { show: false },
+      },
+      {
+        name: '训练作业', type: 'bar', stack: 'total', data: trainData,
+        itemStyle: { color: '#10b981' },
+        emphasis: { itemStyle: { color: '#34d399' } },
+        barMaxWidth: 20,
+      },
+      {
+        name: '推理服务', type: 'bar', stack: 'total', data: inferData,
+        itemStyle: { color: '#f59e0b', borderRadius: [0, 4, 4, 0] },
+        emphasis: { itemStyle: { color: '#fbbf24' } },
+        barMaxWidth: 20,
+      },
     ],
   });
   setTimeout(() => c.resize(), 0);
@@ -510,12 +546,8 @@ function loadData(force) {
       const leaderMap = buildLeaderMap(data);
       initDonut(leaderMap.map(([l,ld]) => [l, ld.gpu_num]));
 
-      // spec chart
-      const specMap = { devenv:{}, train:{}, inference:{} };
-      ['devenv','train','inference'].forEach(t => {
-        Object.assign(specMap[t], (data[t]||{}).spec_data || {});
-      });
-      initSpecChart(specMap);
+      // team stacked chart (reuse leaderMap)
+      initTeamChart(leaderMap);
 
       // detail
       renderDetail(leaderMap);

@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import pandas as pd
 from pypinyin import lazy_pinyin
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 
 app = Flask(__name__)
 
@@ -52,8 +52,8 @@ except FileNotFoundError:
     raise SystemExit(f"[ERROR] 找不到花名册文件：{_EXCEL_PATH}")
 capability_columns = df.columns[1:-2].tolist()
 
-usr_dict = {}       # key → leader
-usr_name_dict = {}  # key → 用户全名
+usr_dict = {}       # key (lowercase) → leader
+usr_name_dict = {}  # key (lowercase) → 用户全名
 
 
 def get_first_letter(text):
@@ -65,30 +65,67 @@ def get_first_letter(text):
 
 
 def extract_id(text):
+    """去掉首个字母前缀，保留其余所有内容（含字母数字混合ID）。"""
     s = str(text).strip()
     return s[1:] if s and s[0].isalpha() else s
 
 
+def _store(key, name, leader):
+    """将 key 统一转为小写后写入字典，跳过空 key。"""
+    k = key.strip().lower()
+    if not k:
+        return
+    usr_name_dict[k] = name
+    if leader:                  # 只在 leader 非空时存入，避免空串覆盖
+        usr_dict[k] = leader
+
+
 for col in capability_columns:
-    leader = str(df[col].iloc[0]).strip() if pd.notna(df[col].iloc[0]) else ''
+    raw_leader = df[col].iloc[0]
+    leader = str(raw_leader).strip() if pd.notna(raw_leader) else ''
+    if leader in ('nan', ''):
+        leader = col            # 用列名作为降级 leader 名
     for member in df[col].iloc[1:]:
         if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
             s = str(member).strip()
             mid = extract_id(s)
             key = f'{get_first_letter(s)}{mid}' if mid else get_first_letter(s)
-            usr_dict[key] = leader
-            usr_name_dict[key] = s
+            _store(key, s, leader)  # 完整 key
             if mid:
-                usr_dict[mid] = leader
-                usr_name_dict[mid] = s
+                _store(mid, s, leader)  # 纯 mid（去掉前缀）
+
+print(f"[花名册] 共加载 {len(usr_dict)} 个用户ID → 组长映射，"
+      f"示例：{list(usr_dict.items())[:3]}")
 
 
 # ── 通用：用户信息查找 ────────────────────────────────────
 def resolve_user(user_id):
-    """返回 (user_name, leader_name)，找不到时降级返回 user_id 本身。"""
-    stripped = user_id[1:] if user_id and user_id[0].isalpha() else None
-    user_name = usr_name_dict.get(user_id) or usr_name_dict.get(stripped) or user_id
-    leader_name = usr_dict.get(user_id) or usr_dict.get(stripped) or user_name
+    """返回 (user_name, leader_name)，找不到时降级返回 user_id 本身。
+    所有 key 统一转小写匹配，避免大小写不一致导致漏查。
+    """
+    if not user_id:
+        return user_id or '', user_id or ''
+
+    uid = user_id.strip().lower()
+    # 尝试完整 ID 和去掉首字母后的 ID 两种形式
+    candidates = [uid]
+    if uid and uid[0].isalpha():
+        candidates.append(uid[1:])   # 去掉一个前缀字母
+
+    user_name = None
+    leader_name = None
+    for key in candidates:
+        if not key:
+            continue
+        if user_name is None and key in usr_name_dict:
+            user_name = usr_name_dict[key]
+        if leader_name is None and key in usr_dict:
+            leader_name = usr_dict[key]
+        if user_name and leader_name:
+            break
+
+    user_name = user_name or user_id       # 找不到全名时用原始 ID
+    leader_name = leader_name or user_name  # 找不到组长时用自身名称
     return user_name, leader_name
 
 
@@ -450,6 +487,21 @@ def get_cached_data():
 @app.route('/')
 def index():
     return render_template('index_multi.html')
+
+
+@app.route('/debug/users')
+def debug_users():
+    """调试接口：查看花名册解析结果和用户映射情况。"""
+    sample_uid = request.args.get('uid', '')
+    result = {
+        'total_entries': len(usr_dict),
+        'sample_entries': dict(list(usr_dict.items())[:20]),
+        'distinct_leaders': list(set(usr_dict.values())),
+    }
+    if sample_uid:
+        uname, leader = resolve_user(sample_uid)
+        result['lookup'] = {'user_id': sample_uid, 'user_name': uname, 'leader': leader}
+    return jsonify(result)
 
 
 @app.route('/data')

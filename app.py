@@ -14,25 +14,24 @@ from flask import Flask, render_template, jsonify, request
 
 app = Flask(__name__)
 
-# ── 鉴权配置 ──────────────────────────────────────────────
-ENDPOINT      = "https://roma.huawei.com"   # 替换为实际 Endpoint
-APPID         = "com.noah.pangu.rl"
-API_VERSION   = "v1"                        # demanager 接口 version 参数
-VENDOR        = "HEC"
-REGION        = "cn-southwest-2"
-csb_token = "xxxx"                      # Authorization header 值
-X_HW_ID       = "xxxx"                      # X-HW-ID header 值
-X_HW_APPKEY   = "xxxx"                      # X-HW-APPKEY header 值
+#──鉴权配置──────────────────────────────────────────────
+ENDPOINT=""#替换为实际Endpoint
+APPID=""
+API_VERSION="v1"#demanager接口version参数
+VENDOR="HEC"
+REGION=""
+csb_token=""#Authorizationheader值
+X_HW_ID=""#X-HW-IDheader值
+X_HW_APPKEY=""#X-HW-APPKEYheader值
 
-HEADERS = {
-    "content-Type":  "application/json",
-    "csb-token": csb_token,
-    "X-HW-ID":       X_HW_ID,
-    "X-HW-APPKEY":   X_HW_APPKEY,
+HEADERS={
+"content-Type":"application/json",
+"csb-token":csb_token,
+"X-HW-ID":X_HW_ID,
+"X-HW-APPKEY":X_HW_APPKEY,
 }
-
 # ── 缓存配置 ──────────────────────────────────────────────
-CACHE_EXPIRE = 300  # 5 分钟
+CACHE_EXPIRE = 60  # 1 分钟
 
 _cache_lock = threading.Lock()
 _cache = {
@@ -54,6 +53,9 @@ capability_columns = df.columns[1:-2].tolist()
 
 usr_dict = {}       # key (lowercase) → leader
 usr_name_dict = {}  # key (lowercase) → 用户全名
+quota_dict = {}     # leader_name → 配额NPU卡数
+
+_UNKNOWN_LEADER = "__unknown__"  # 哨兵：不在花名册的用户统一归入此组
 
 
 def get_first_letter(text):
@@ -64,10 +66,36 @@ def get_first_letter(text):
     return lazy_pinyin(c)[0][0].lower() if '\u4e00' <= c <= '\u9fff' else c.lower()
 
 
-def extract_id(text):
-    """去掉首个字母前缀，保留其余所有内容（含字母数字混合ID）。"""
-    s = str(text).strip()
-    return s[1:] if s and s[0].isalpha() else s
+def _parse_member_key(s):
+    """将 Excel 成员单元格解析为 (key, mid)，key 与 API 返回的 user_id 格式匹配。
+
+    API user_id 格式统一为：姓名拼音首字母 + 工号/ID
+      "张某某84434546"         → ("z84434546",  "84434546")  旧格式：中文名直连数字
+    """
+    parts = s.split()
+
+    if len(parts) >= 2:
+        id_part = parts[-1]
+        name_part = ' '.join(parts[:-1])
+        # 无论工号是纯数字还是字母数字混合，API 格式均为：姓名拼音首字母 + 工号
+        first = get_first_letter(name_part)
+        key = (first + id_part).lower()
+        mid = id_part.lower()   # 去掉首字母后的部分，用于 resolve_user 的 stripped 查找
+        return key, mid
+
+    # 单 token（无空格）
+    if s and '\u4e00' <= s[0] <= '\u9fff':
+        # 中文打头：提取全部数字（兼容"张某某84434546"旧格式）
+        digits = re.sub(r'[^\d]', '', s)
+        first = get_first_letter(s)
+        return (first + digits, digits) if digits else (first, '')
+    elif s and s[0].isalpha():
+        # 字母打头 ID（如 w00910350）
+        k = s.lower()
+        return k, k[1:]
+    else:
+        k = s.lower()
+        return k, k
 
 
 def _store(key, name, leader):
@@ -76,7 +104,7 @@ def _store(key, name, leader):
     if not k:
         return
     usr_name_dict[k] = name
-    if leader:                  # 只在 leader 非空时存入，避免空串覆盖
+    if leader:
         usr_dict[k] = leader
 
 
@@ -84,18 +112,36 @@ for col in capability_columns:
     raw_leader = df[col].iloc[0]
     leader = str(raw_leader).strip() if pd.notna(raw_leader) else ''
     if leader in ('nan', ''):
-        leader = col            # 用列名作为降级 leader 名
-    for member in df[col].iloc[1:]:
+        leader = col
+
+    # 读取配额（第三行 = iloc[1]，第二行已是组长名）
+    if len(df) > 1:
+        raw_quota = df[col].iloc[1]
+        try:
+            q = int(float(str(raw_quota))) if pd.notna(raw_quota) else 0
+        except (ValueError, TypeError):
+            q = 0
+        if q > 0:
+            quota_dict[leader] = q
+
+    # 将组长自身也注册到字典：组长可能自己也有任务，需归入本组统计
+    lkey, lmid = _parse_member_key(leader)
+    if lkey:
+        _store(lkey, leader, leader)
+    if lmid and lmid != lkey:
+        _store(lmid, leader, leader)
+
+    # 成员从第四行开始（iloc[2:]，跳过组长行和配额行）
+    for member in df[col].iloc[2:]:
         if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
             s = str(member).strip()
-            mid = extract_id(s)
-            key = f'{get_first_letter(s)}{mid}' if mid else get_first_letter(s)
-            _store(key, s, leader)  # 完整 key
-            if mid:
-                _store(mid, s, leader)  # 纯 mid（去掉前缀）
+            key, mid = _parse_member_key(s)
+            _store(key, s, leader)
+            if mid and mid != key:
+                _store(mid, s, leader)
 
 print(f"[花名册] 共加载 {len(usr_dict)} 个用户ID → 组长映射，"
-      f"示例：{list(usr_dict.items())[:3]}")
+      f"示例：{list(usr_dict.items())[:5]}")
 
 
 # ── 通用：用户信息查找 ────────────────────────────────────
@@ -124,8 +170,8 @@ def resolve_user(user_id):
         if user_name and leader_name:
             break
 
-    user_name = user_name or user_id       # 找不到全名时用原始 ID
-    leader_name = leader_name or user_name  # 找不到组长时用自身名称
+    user_name = user_name or user_id          # 找不到全名时用原始 ID
+    leader_name = leader_name or _UNKNOWN_LEADER  # 不在花名册→归入非白名单组
     return user_name, leader_name
 
 
@@ -150,10 +196,15 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
     now_ms = time.time() * 1000
 
     for item in items:
-        # 状态过滤
-        if status_field and status_value:
-            if item.get(status_field) != status_value:
-                continue
+        # 状态过滤（status_value 可为单值或 set/list）
+        if status_field and status_value is not None:
+            sv = item.get(status_field)
+            if isinstance(status_value, (set, list, tuple)):
+                if sv not in status_value:
+                    continue
+            else:
+                if sv != status_value:
+                    continue
         # region 过滤
         if region_field and region_value:
             if item.get(region_field) != region_value:
@@ -266,9 +317,9 @@ def fetch_devenv_data():
         body={
             "vendor":   VENDOR,
             "region":   REGION,
-            "deType":   "",     # 不过滤类型，返回全部
+            "deType":   "Notebook",     # 不过滤类型，返回全部
             "pageNum":  1,
-            "pageSize": 500,
+            "pageSize": 10000,
         },
     )
     if data is None:
@@ -300,9 +351,9 @@ def fetch_train_data():
             "jobType":          "",
             "region":           REGION,
             "params": _b64({
-                "pageSize":  "500",
-                "pageIndex": "0",
-#                "status":    "8",
+                "pageSize": 10000,
+                "pageIndex": 1,
+                "status": "8",
             }),
         },
     )
@@ -314,7 +365,7 @@ def fetch_train_data():
         name_field="name",
         spec_field="specName",
         status_field="statusCode",
-        status_value="8",
+        status_value={"6", "7", "8"},  # 运行中(8)、等待资源(6)、初始化(7)
         duration_field="duration",
     )
 
@@ -328,7 +379,7 @@ def _fetch_inference_v1():
             "appid":     APPID,
             "infertype": "real-time",
             "params": _b64({
-                "pageSize":    500,
+                "pageSize":    10000,
                 "pageIndex":   1,
                 "filterParam": [{"key": "name", "value": ""}],
             }),
@@ -345,7 +396,7 @@ def _fetch_inference_v2():
             "infertype": "real-time",
             "vendor":    VENDOR,
             "params": _b64({
-                "pageSize":    500,
+                "pageSize":    10000,
                 "pageIndex":   1,
                 "filterParam": [{"key": "name", "value": ""}],
             }),
@@ -511,14 +562,28 @@ def get_data():
         "train":     d["train"],
         "devenv":    d["devenv"],
         "inference": d["inference"],
+        "quotas":    quota_dict,
         "update_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(d["last_update"])),
     })
 
 
 if __name__ == '__main__':
-    import socket
-    PORT = 5063
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex(('127.0.0.1', PORT)) == 0:
+    import sys, socket
+    PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5063
+
+    # 检测端口占用
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _chk:
+        if _chk.connect_ex(('127.0.0.1', PORT)) == 0:
             raise SystemExit(f"[ERROR] 端口 {PORT} 已被占用，请先停止旧进程（lsof -i :{PORT}）")
+
+    # 获取本机局域网 IP
+    try:
+        _tmp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _tmp.connect(('8.8.8.8', 80))
+        LOCAL_IP = _tmp.getsockname()[0]
+        _tmp.close()
+    except Exception:
+        LOCAL_IP = '127.0.0.1'
+
+    print(f"[服务] 访问地址：http://{LOCAL_IP}:{PORT}")
     app.run(host='0.0.0.0', port=PORT, debug=False)

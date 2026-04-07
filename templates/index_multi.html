@@ -53,9 +53,12 @@ header h1 em{
 .sc{
   background:var(--card);border:1px solid var(--border);border-radius:var(--r);
   padding:18px 20px 16px;position:relative;overflow:hidden;
-  transition:border-color .2s,box-shadow .2s;cursor:default;
+  transition:border-color .22s,box-shadow .22s;cursor:default;
 }
-.sc:hover{border-color:var(--border-hi)}
+.sc.blue:hover  {border-color:var(--blue);  box-shadow:0 0 0 1px var(--blue),  0 0 28px color-mix(in srgb,var(--blue)   30%,transparent)}
+.sc.green:hover {border-color:var(--green); box-shadow:0 0 0 1px var(--green), 0 0 28px color-mix(in srgb,var(--green)  30%,transparent)}
+.sc.orange:hover{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange),0 0 28px color-mix(in srgb,var(--orange) 30%,transparent)}
+.sc.red:hover   {border-color:var(--purple);box-shadow:0 0 0 1px var(--purple),0 0 28px color-mix(in srgb,var(--purple) 30%,transparent)}
 .sc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
 .sc-label{font-size:11px;color:var(--text2);letter-spacing:.8px;text-transform:uppercase;font-weight:600}
 .sc-icon{
@@ -89,7 +92,9 @@ header h1 em{
   background:var(--card);border:1px solid var(--border);
   border-radius:var(--r);padding:20px 20px 16px;
   display:flex;flex-direction:column;
+  transition:border-color .22s,box-shadow .22s;
 }
+.cbox:hover{border-color:rgba(99,102,241,.45);box-shadow:0 0 0 1px rgba(99,102,241,.2),0 0 28px rgba(99,102,241,.1)}
 .cbox-hdr{
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:14px;flex-shrink:0;
@@ -97,6 +102,12 @@ header h1 em{
 .cbox-title{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text)}
 .cbox-title .icon{font-size:16px}
 .cbox .echart{flex:1;min-height:280px;width:100%}
+
+/* ── quota chart (uses same .echart sizing as right panel) ── */
+.over-badge-hdr{
+  font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;
+  background:rgba(239,68,68,.18);color:#f87171;flex-shrink:0;
+}
 
 /* ── Row 3: detail section ── */
 .detail-wrap{padding:14px 28px 28px}
@@ -277,13 +288,14 @@ header h1 em{
 <div class="charts-row">
   <div class="cbox">
     <div class="cbox-hdr">
-      <div class="cbox-title"><span class="icon">◈</span>各小组 NPU 占用分布</div>
+      <div class="cbox-title"><span class="icon">◈</span>各小组 NPU 占用 / 配额</div>
+      <span id="quota-over-count" style="display:none" class="over-badge-hdr"></span>
     </div>
-    <div class="echart" id="chart-donut"></div>
+    <div class="echart" id="chart-quota"></div>
   </div>
   <div class="cbox">
     <div class="cbox-hdr">
-      <div class="cbox-title"><span class="icon">▦</span>各资源池 NPU 占用（开发 / 训练 / 推理）</div>
+      <div class="cbox-title"><span class="icon">▦</span>各小组 NPU 占用（开发 / 训练 / 推理）</div>
     </div>
     <div class="echart" id="chart-spec"></div>
   </div>
@@ -303,77 +315,184 @@ header h1 em{
 
 <script>
 const PAL = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#ef4444','#84cc16','#f97316','#a78bfa'];
+const UNKNOWN_LEADER = '__unknown__';
 let _charts = {};
 
-/* ── charts ── */
-function initDonut(leaders) {
-  const el = document.getElementById('chart-donut');
-  if (_charts.donut) _charts.donut.dispose();
+/* ── quota list ── */
+/* ── quota bullet chart ── */
+function initQuotaChart(leaderMap, quotas) {
+  const el = document.getElementById('chart-quota');
+  if (_charts.quota) _charts.quota.dispose();
   const c = echarts.init(el);
-  _charts.donut = c;
-  const top8 = leaders.slice(0, 8);
-  const others = leaders.slice(8).reduce((s, l) => s + l[1], 0);
-  const seriesData = top8.map((l, i) => ({ name: l[0], value: l[1], itemStyle: { color: PAL[i] } }));
-  if (others > 0) seriesData.push({ name: '其他Leader', value: others, itemStyle: { color: '#475569' } });
-  c.setOption({
-    backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'item', formatter: '{b}: {c} NPU ({d}%)',
-      backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
-      textStyle: { color: '#e2e8f0', fontSize: 13 },
-    },
-    legend: {
-      orient: 'vertical', right: 10, top: 'center',
-      textStyle: { color: '#94a3b8', fontSize: 12 },
-      formatter: n => n.length > 14 ? n.slice(0, 14) + '…' : n,
-    },
-    series: [{
-      type: 'pie', radius: ['42%', '68%'], center: ['36%', '50%'],
-      data: seriesData,
-      label: { show: false },
-      emphasis: {
-        label: { show: true, fontSize: 13, fontWeight: 700 },
-        itemStyle: { shadowBlur: 20, shadowColor: 'rgba(0,0,0,.5)' },
-      },
-      itemStyle: { borderRadius: 4, borderWidth: 2, borderColor: 'rgba(8,12,20,.6)' },
-    }],
-  });
-  setTimeout(() => c.resize(), 0);
-  window.addEventListener('resize', () => c.resize());
-}
+  _charts.quota = c;
 
-function initSpecChart(specMap) {
-  const el = document.getElementById('chart-spec');
-  if (_charts.spec) _charts.spec.dispose();
-  const c = echarts.init(el);
-  _charts.spec = c;
-  const allSpecs = new Set();
-  ['devenv','train','inference'].forEach(t => Object.keys(specMap[t]||{}).forEach(s => allSpecs.add(s)));
-  const specs = [...allSpecs]
-    .map(s => [s, (specMap.devenv[s]||0)+(specMap.train[s]||0)+(specMap.inference[s]||0)])
-    .sort((a,b)=>b[1]-a[1]).slice(0,12).map(e=>e[0]);
+  const top = leaderMap.slice(0, 12).reverse();
+  const fullNames = top.map(([l]) => l === UNKNOWN_LEADER ? '非白名单用户' : l);
+  const shortNames = top.map(([l]) => {
+    const name = l === UNKNOWN_LEADER ? '非白名单用户' : l;
+    return name.length > 10 ? name.slice(0, 10) + '…' : name;
+  });
+
+  let overCount = 0;
+  const usedData = top.map(([l, ld], i) => {
+    const used  = ld.gpu_num;
+    const quota = quotas[l] || 0;
+    const isOver = quota > 0 && used > quota;
+    const isWarn = !isOver && quota > 0 && used / quota > 0.8;
+    if (isOver) overCount++;
+    const color = isOver ? '#ef4444' : isWarn ? '#f59e0b' : PAL[i % PAL.length];
+    return {
+      value: used,
+      itemStyle: { color, borderRadius: [0, 3, 3, 0] },
+      label: isOver
+        ? { show: true, position: 'right', formatter: `+${used - quota}`,
+            color: '#f87171', fontSize: 11, fontWeight: 700 }
+        : { show: false },
+    };
+  });
+
+  const quotaData = top.map(([l]) => quotas[l] || 0);
+  // 横轴上限：已用和配额最大值再留10%空间
+  const maxX = Math.max(1, ...top.map(([,ld])=>ld.gpu_num), ...quotaData) * 1.12;
+
+  // 配额竖线：用 scatter 放在每条 bar 对应的 y 位置
+  const markerData = top.map(([l], i) => {
+    const q = quotas[l];
+    return q ? { value: [q, i], itemStyle: { color: 'rgba(255,255,255,.45)' } } : null;
+  }).filter(Boolean);
+
   c.setOption({
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
       textStyle: { color: '#e2e8f0', fontSize: 12 },
+      formatter(params) {
+        const idx = params[0]?.dataIndex ?? 0;
+        const leader = fullNames[idx];
+        const used   = top[idx]?.[1]?.gpu_num ?? 0;
+        const quota  = quotas[leader] || 0;
+        const isOver = quota > 0 && used > quota;
+        const pct    = quota > 0 ? Math.round(used / quota * 100) : null;
+        const sc     = isOver ? '#f87171' : pct > 80 ? '#fbbf24' : '#34d399';
+        return `<div style="font-weight:700;margin-bottom:5px">${leader}</div>`
+          + `<div>已用 NPU：<b style="color:${sc}">${used}</b></div>`
+          + (quota ? `<div>配额 NPU：<span style="color:#94a3b8">${quota}</span></div>` : '')
+          + (quota ? `<div>使用率：<b style="color:${sc}">${pct}%</b>`
+              + (isOver ? ` <span style="color:#f87171;font-weight:700">超额 +${used-quota}</span>` : '')
+              + `</div>` : '');
+      },
     },
-    legend: { top: 0, right: 0, textStyle: { color: '#94a3b8', fontSize: 12 }, itemWidth: 10, itemHeight: 10 },
-    grid: { left: 8, right: 14, top: 28, bottom: 4, containLabel: true },
+    grid: { left: 8, right: 48, top: 4, bottom: 4, containLabel: true },
     xAxis: {
-      type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
+      type: 'value', max: maxX,
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
       axisLabel: { color: '#64748b', fontSize: 11 },
     },
     yAxis: {
-      type: 'category', data: specs,
-      axisLabel: { color: '#94a3b8', fontSize: 10 },
+      type: 'category', data: shortNames,
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
       axisLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
     },
     series: [
-      { name:'开发环境', type:'bar', data: specs.map(s=>specMap.devenv[s]||0), itemStyle:{color:'#3b82f6',borderRadius:[0,3,3,0]}, barMaxWidth:12 },
-      { name:'训练作业', type:'bar', data: specs.map(s=>specMap.train[s]||0),  itemStyle:{color:'#10b981',borderRadius:[0,3,3,0]}, barMaxWidth:12 },
-      { name:'推理服务', type:'bar', data: specs.map(s=>specMap.inference[s]||0), itemStyle:{color:'#f59e0b',borderRadius:[0,3,3,0]}, barMaxWidth:12 },
+      // 配额背景轨道（淡灰底条）
+      {
+        type: 'bar', name: '配额', data: quotaData,
+        barMaxWidth: 20, z: 1,
+        itemStyle: { color: 'rgba(255,255,255,.07)', borderRadius: [0, 3, 3, 0] },
+        tooltip: { show: false },
+      },
+      // 已用前景条（叠加在背景上）
+      {
+        type: 'bar', name: '已用', data: usedData,
+        barMaxWidth: 20, barGap: '-100%', z: 2,
+      },
+      // 配额刻度线（scatter rect 符号）
+      {
+        type: 'scatter', name: '配额线', data: markerData,
+        symbol: 'rect', symbolSize: [3, 18], z: 3,
+        itemStyle: { color: 'rgba(255,255,255,.4)' },
+        tooltip: { show: false },
+      },
+    ],
+  });
+
+  // 更新超额徽章
+  const badge = document.getElementById('quota-over-count');
+  if (overCount > 0) {
+    badge.textContent = `${overCount} 组超额`;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  setTimeout(() => c.resize(), 0);
+  window.addEventListener('resize', () => c.resize());
+}
+
+function initTeamChart(leaderMap) {
+  const el = document.getElementById('chart-spec');
+  if (_charts.spec) _charts.spec.dispose();
+  const c = echarts.init(el);
+  _charts.spec = c;
+
+  // 取前12个小组，倒序排列让最大值在顶部
+  const top = leaderMap.slice(0, 12).reverse();
+  const fullNames = top.map(([l]) => l === UNKNOWN_LEADER ? '非白名单用户' : l);
+  const names  = fullNames.map(n => n.length > 8 ? n.slice(0,8)+'…' : n);
+  const devData   = top.map(([,ld]) => (ld.types.devenv   || {gpu_num:0}).gpu_num);
+  const trainData = top.map(([,ld]) => (ld.types.train    || {gpu_num:0}).gpu_num);
+  const inferData = top.map(([,ld]) => (ld.types.inference|| {gpu_num:0}).gpu_num);
+
+  c.setOption({
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      backgroundColor: '#1a2035', borderColor: 'rgba(255,255,255,.1)',
+      textStyle: { color: '#e2e8f0', fontSize: 12 },
+      formatter(params) {
+        const i = params[0].dataIndex;
+        const rows = params.filter(p=>p.value>0)
+          .map(p=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:5px"></span>${p.seriesName}: <b>${p.value}</b>`).join('<br>');
+        const total = devData[i]+trainData[i]+inferData[i];
+        return `<div style="font-weight:700;margin-bottom:6px">${fullNames[i]}</div>${rows}<hr style="border-color:rgba(255,255,255,.1);margin:6px 0"><span style="color:#94a3b8">合计:</span> <b style="color:#fff">${total} NPU</b>`;
+      },
+    },
+    legend: {
+      top: 0, right: 0,
+      textStyle: { color: '#94a3b8', fontSize: 12 }, itemWidth: 10, itemHeight: 10,
+    },
+    grid: { left: 8, right: 16, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
+      axisLabel: { color: '#64748b', fontSize: 11 },
+    },
+    yAxis: {
+      type: 'category', data: names,
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,.05)' } },
+    },
+    series: [
+      {
+        name: '开发环境', type: 'bar', stack: 'total', data: devData,
+        itemStyle: { color: '#3b82f6' },
+        emphasis: { itemStyle: { color: '#60a5fa' } },
+        barMaxWidth: 20,
+        label: { show: false },
+      },
+      {
+        name: '训练作业', type: 'bar', stack: 'total', data: trainData,
+        itemStyle: { color: '#10b981' },
+        emphasis: { itemStyle: { color: '#34d399' } },
+        barMaxWidth: 20,
+      },
+      {
+        name: '推理服务', type: 'bar', stack: 'total', data: inferData,
+        itemStyle: { color: '#f59e0b', borderRadius: [0, 4, 4, 0] },
+        emphasis: { itemStyle: { color: '#fbbf24' } },
+        barMaxWidth: 20,
+      },
     ],
   });
   setTimeout(() => c.resize(), 0);
@@ -440,32 +559,53 @@ function typeSection(ld, type, li, typeIdx) {
   </div>`;
 }
 
+function leaderBlock(leader, ld, li, isUnknown) {
+  const color = isUnknown ? '#64748b' : PAL[li % PAL.length];
+  const displayName = isUnknown ? '非白名单用户' : leader;
+  const badge = isUnknown
+    ? `<div class="leader-badge" style="background:rgba(100,116,139,.2);color:#94a3b8">⚠ 非白名单</div>`
+    : `<div class="leader-badge">★ Leader</div>`;
+  const typeSecs = ['devenv','train','inference']
+    .map((t, ti) => typeSection(ld.types[t], t, li, ti)).join('');
+  return `
+  <div class="lb" id="lb-${li}" style="--lc:${color}">
+    <div class="lb-row" onclick="toggleLb('lb-${li}')">
+      <span class="chev">▶</span>
+      <div class="lavatar" style="opacity:${isUnknown ? .6 : 1}">${isUnknown ? '?' : (displayName[0]||'?')}</div>
+      <div class="linfo">
+        <div class="lname" title="${displayName}">${displayName}</div>
+        <div class="lmeta">${ld.member_count} 个用户 · ${ld.task_count} 个任务</div>
+      </div>
+      <div class="lstats">
+        <div class="lstat"><div class="lstat-lbl">总 NPU</div><div class="lstat-val npu-val">${ld.gpu_num}</div></div>
+        <div class="lstat"><div class="lstat-lbl">总任务</div><div class="lstat-val task-val">${ld.task_count}</div></div>
+        <div class="lstat"><div class="lstat-lbl">最长任务</div><div class="lstat-val dur-val">${ld.max_duration}h</div></div>
+      </div>
+      ${badge}
+    </div>
+    <div class="lb-body">${typeSecs}</div>
+  </div>`;
+}
+
 function renderDetail(leaderMap) {
   const list = document.getElementById('detail-list');
   if (!leaderMap.length) { list.innerHTML = '<div class="empty-tip">暂无数据</div>'; return; }
-  list.innerHTML = leaderMap.map(([leader, ld], li) => {
-    const color = PAL[li % PAL.length];
-    const typeSecs = ['devenv','train','inference']
-      .map((t,ti) => typeSection(ld.types[t], t, li, ti)).join('');
-    return `
-    <div class="lb" id="lb-${li}" style="--lc:${color}">
-      <div class="lb-row" onclick="toggleLb('lb-${li}')">
-        <span class="chev">▶</span>
-        <div class="lavatar">${(leader[0]||'?')}</div>
-        <div class="linfo">
-          <div class="lname" title="${leader}">${leader}</div>
-          <div class="lmeta">${ld.member_count} 位组员</div>
-        </div>
-        <div class="lstats">
-          <div class="lstat"><div class="lstat-lbl">总 NPU</div><div class="lstat-val npu-val">${ld.gpu_num}</div></div>
-          <div class="lstat"><div class="lstat-lbl">总任务</div><div class="lstat-val task-val">${ld.task_count}</div></div>
-          <div class="lstat"><div class="lstat-lbl">最长任务</div><div class="lstat-val dur-val">${ld.max_duration}h</div></div>
-        </div>
-        <div class="leader-badge">★ Leader</div>
-      </div>
-      <div class="lb-body">${typeSecs}</div>
-    </div>`;
-  }).join('');
+
+  const known   = leaderMap.filter(([l]) => l !== UNKNOWN_LEADER);
+  const unknown = leaderMap.find(([l])  => l === UNKNOWN_LEADER);
+
+  const knownHtml = known.map(([leader, ld], li) =>
+    leaderBlock(leader, ld, li, false)
+  ).join('');
+
+  const unknownHtml = unknown ? `
+    <div style="margin-top:10px;padding:8px 4px 2px;font-size:11px;color:#475569;letter-spacing:.6px;text-transform:uppercase">
+      ⚠ 非白名单用户（${unknown[1].member_count} 人 · ${unknown[1].gpu_num} NPU）
+    </div>
+    ${leaderBlock(UNKNOWN_LEADER, unknown[1], known.length, true)}
+  ` : '';
+
+  list.innerHTML = knownHtml + unknownHtml;
 }
 
 function toggleLb(id) { document.getElementById(id).classList.toggle('open'); }
@@ -506,16 +646,12 @@ function loadData(force) {
       document.getElementById('sub-train').textContent    = `${counts.train} 个${labels.train}`;
       document.getElementById('sub-inference').textContent = `${counts.inference} 个${labels.inference}`;
 
-      // donut: per-leader totals
+      // both charts share leaderMap
       const leaderMap = buildLeaderMap(data);
-      initDonut(leaderMap.map(([l,ld]) => [l, ld.gpu_num]));
+      initQuotaChart(leaderMap, data.quotas || {});
 
-      // spec chart
-      const specMap = { devenv:{}, train:{}, inference:{} };
-      ['devenv','train','inference'].forEach(t => {
-        Object.assign(specMap[t], (data[t]||{}).spec_data || {});
-      });
-      initSpecChart(specMap);
+      // team stacked chart (reuse leaderMap)
+      initTeamChart(leaderMap);
 
       // detail
       renderDetail(leaderMap);

@@ -201,10 +201,15 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
     now_ms = time.time() * 1000
 
     for item in items:
-        # 状态过滤
-        if status_field and status_value:
-            if item.get(status_field) != status_value:
-                continue
+        # 状态过滤（status_value 可为单值或 set/list）
+        if status_field and status_value is not None:
+            sv = item.get(status_field)
+            if isinstance(status_value, (set, list, tuple)):
+                if sv not in status_value:
+                    continue
+            else:
+                if sv != status_value:
+                    continue
         # region 过滤
         if region_field and region_value:
             if item.get(region_field) != region_value:
@@ -365,7 +370,7 @@ def fetch_train_data():
         name_field="name",
         spec_field="specName",
         status_field="statusCode",
-        status_value="8",
+        status_value={"6", "7", "8"},  # 运行中(8)、等待资源(6)、初始化(7)
         duration_field="duration",
     )
 

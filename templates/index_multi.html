@@ -326,9 +326,12 @@ function initQuotaChart(leaderMap, quotas) {
   const c = echarts.init(el);
   _charts.quota = c;
 
-  const top = leaderMap.filter(([l]) => l !== UNKNOWN_LEADER).slice(0, 12).reverse();
-  const fullNames = top.map(([l]) => l);
-  const shortNames = top.map(([l]) => l.length > 10 ? l.slice(0, 10) + '…' : l);
+  const top = leaderMap.slice(0, 12).reverse();
+  const fullNames = top.map(([l]) => l === UNKNOWN_LEADER ? '非白名单用户' : l);
+  const shortNames = top.map(([l]) => {
+    const name = l === UNKNOWN_LEADER ? '非白名单用户' : l;
+    return name.length > 10 ? name.slice(0, 10) + '…' : name;
+  });
 
   let overCount = 0;
   const usedData = top.map(([l, ld], i) => {
@@ -433,10 +436,10 @@ function initTeamChart(leaderMap) {
   const c = echarts.init(el);
   _charts.spec = c;
 
-  // 取前12个小组（排除非白名单组），倒序排列让最大值在顶部
-  const top = leaderMap.filter(([l]) => l !== UNKNOWN_LEADER).slice(0, 12).reverse();
-  const names  = top.map(([l]) => l.length > 8 ? l.slice(0,8)+'…' : l);
-  const fullNames = top.map(([l]) => l);
+  // 取前12个小组，倒序排列让最大值在顶部
+  const top = leaderMap.slice(0, 12).reverse();
+  const fullNames = top.map(([l]) => l === UNKNOWN_LEADER ? '非白名单用户' : l);
+  const names  = fullNames.map(n => n.length > 8 ? n.slice(0,8)+'…' : n);
   const devData   = top.map(([,ld]) => (ld.types.devenv   || {gpu_num:0}).gpu_num);
   const trainData = top.map(([,ld]) => (ld.types.train    || {gpu_num:0}).gpu_num);
   const inferData = top.map(([,ld]) => (ld.types.inference|| {gpu_num:0}).gpu_num);

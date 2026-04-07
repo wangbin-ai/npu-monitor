@@ -56,6 +56,8 @@ usr_dict = {}       # key (lowercase) → leader
 usr_name_dict = {}  # key (lowercase) → 用户全名
 quota_dict = {}     # leader_name → 配额NPU卡数
 
+_UNKNOWN_LEADER = "__unknown__"  # 哨兵：不在花名册的用户统一归入此组
+
 
 def get_first_letter(text):
     text = str(text).strip()
@@ -175,8 +177,8 @@ def resolve_user(user_id):
         if user_name and leader_name:
             break
 
-    user_name = user_name or user_id       # 找不到全名时用原始 ID
-    leader_name = leader_name or user_name  # 找不到组长时用自身名称
+    user_name = user_name or user_id          # 找不到全名时用原始 ID
+    leader_name = leader_name or _UNKNOWN_LEADER  # 不在花名册→归入非白名单组
     return user_name, leader_name
 
 

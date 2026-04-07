@@ -315,6 +315,7 @@ header h1 em{
 
 <script>
 const PAL = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#ef4444','#84cc16','#f97316','#a78bfa'];
+const UNKNOWN_LEADER = '__unknown__';
 let _charts = {};
 
 /* ── quota list ── */
@@ -325,7 +326,7 @@ function initQuotaChart(leaderMap, quotas) {
   const c = echarts.init(el);
   _charts.quota = c;
 
-  const top = leaderMap.slice(0, 12).reverse(); // 倒序：最大值显示在顶部
+  const top = leaderMap.filter(([l]) => l !== UNKNOWN_LEADER).slice(0, 12).reverse();
   const fullNames = top.map(([l]) => l);
   const shortNames = top.map(([l]) => l.length > 10 ? l.slice(0, 10) + '…' : l);
 
@@ -432,8 +433,8 @@ function initTeamChart(leaderMap) {
   const c = echarts.init(el);
   _charts.spec = c;
 
-  // 取前12个小组，倒序排列让最大值在顶部
-  const top = leaderMap.slice(0, 12).reverse();
+  // 取前12个小组（排除非白名单组），倒序排列让最大值在顶部
+  const top = leaderMap.filter(([l]) => l !== UNKNOWN_LEADER).slice(0, 12).reverse();
   const names  = top.map(([l]) => l.length > 8 ? l.slice(0,8)+'…' : l);
   const fullNames = top.map(([l]) => l);
   const devData   = top.map(([,ld]) => (ld.types.devenv   || {gpu_num:0}).gpu_num);
@@ -555,32 +556,53 @@ function typeSection(ld, type, li, typeIdx) {
   </div>`;
 }
 
+function leaderBlock(leader, ld, li, isUnknown) {
+  const color = isUnknown ? '#64748b' : PAL[li % PAL.length];
+  const displayName = isUnknown ? '非白名单用户' : leader;
+  const badge = isUnknown
+    ? `<div class="leader-badge" style="background:rgba(100,116,139,.2);color:#94a3b8">⚠ 非白名单</div>`
+    : `<div class="leader-badge">★ Leader</div>`;
+  const typeSecs = ['devenv','train','inference']
+    .map((t, ti) => typeSection(ld.types[t], t, li, ti)).join('');
+  return `
+  <div class="lb" id="lb-${li}" style="--lc:${color}">
+    <div class="lb-row" onclick="toggleLb('lb-${li}')">
+      <span class="chev">▶</span>
+      <div class="lavatar" style="opacity:${isUnknown ? .6 : 1}">${isUnknown ? '?' : (displayName[0]||'?')}</div>
+      <div class="linfo">
+        <div class="lname" title="${displayName}">${displayName}</div>
+        <div class="lmeta">${ld.member_count} 个用户 · ${ld.task_count} 个任务</div>
+      </div>
+      <div class="lstats">
+        <div class="lstat"><div class="lstat-lbl">总 NPU</div><div class="lstat-val npu-val">${ld.gpu_num}</div></div>
+        <div class="lstat"><div class="lstat-lbl">总任务</div><div class="lstat-val task-val">${ld.task_count}</div></div>
+        <div class="lstat"><div class="lstat-lbl">最长任务</div><div class="lstat-val dur-val">${ld.max_duration}h</div></div>
+      </div>
+      ${badge}
+    </div>
+    <div class="lb-body">${typeSecs}</div>
+  </div>`;
+}
+
 function renderDetail(leaderMap) {
   const list = document.getElementById('detail-list');
   if (!leaderMap.length) { list.innerHTML = '<div class="empty-tip">暂无数据</div>'; return; }
-  list.innerHTML = leaderMap.map(([leader, ld], li) => {
-    const color = PAL[li % PAL.length];
-    const typeSecs = ['devenv','train','inference']
-      .map((t,ti) => typeSection(ld.types[t], t, li, ti)).join('');
-    return `
-    <div class="lb" id="lb-${li}" style="--lc:${color}">
-      <div class="lb-row" onclick="toggleLb('lb-${li}')">
-        <span class="chev">▶</span>
-        <div class="lavatar">${(leader[0]||'?')}</div>
-        <div class="linfo">
-          <div class="lname" title="${leader}">${leader}</div>
-          <div class="lmeta">${ld.member_count} 位组员</div>
-        </div>
-        <div class="lstats">
-          <div class="lstat"><div class="lstat-lbl">总 NPU</div><div class="lstat-val npu-val">${ld.gpu_num}</div></div>
-          <div class="lstat"><div class="lstat-lbl">总任务</div><div class="lstat-val task-val">${ld.task_count}</div></div>
-          <div class="lstat"><div class="lstat-lbl">最长任务</div><div class="lstat-val dur-val">${ld.max_duration}h</div></div>
-        </div>
-        <div class="leader-badge">★ Leader</div>
-      </div>
-      <div class="lb-body">${typeSecs}</div>
-    </div>`;
-  }).join('');
+
+  const known   = leaderMap.filter(([l]) => l !== UNKNOWN_LEADER);
+  const unknown = leaderMap.find(([l])  => l === UNKNOWN_LEADER);
+
+  const knownHtml = known.map(([leader, ld], li) =>
+    leaderBlock(leader, ld, li, false)
+  ).join('');
+
+  const unknownHtml = unknown ? `
+    <div style="margin-top:10px;padding:8px 4px 2px;font-size:11px;color:#475569;letter-spacing:.6px;text-transform:uppercase">
+      ⚠ 非白名单用户（${unknown[1].member_count} 人 · ${unknown[1].gpu_num} NPU）
+    </div>
+    ${leaderBlock(UNKNOWN_LEADER, unknown[1], known.length, true)}
+  ` : '';
+
+  list.innerHTML = knownHtml + unknownHtml;
 }
 
 function toggleLb(id) { document.getElementById(id).classList.toggle('open'); }

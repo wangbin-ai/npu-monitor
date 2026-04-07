@@ -14,25 +14,24 @@ from flask import Flask, render_template, jsonify, request
 
 app = Flask(__name__)
 
-# ── 鉴权配置 ──────────────────────────────────────────────
-ENDPOINT      = "https://roma.huawei.com"   # 替换为实际 Endpoint
-APPID         = "com.noah.pangu.rl"
-API_VERSION   = "v1"                        # demanager 接口 version 参数
-VENDOR        = "HEC"
-REGION        = "cn-southwest-2"
-csb_token = "xxxx"                      # Authorization header 值
-X_HW_ID       = "xxxx"                      # X-HW-ID header 值
-X_HW_APPKEY   = "xxxx"                      # X-HW-APPKEY header 值
+#──鉴权配置──────────────────────────────────────────────
+ENDPOINT=""#替换为实际Endpoint
+APPID=""
+API_VERSION="v1"#demanager接口version参数
+VENDOR="HEC"
+REGION=""
+csb_token=""#Authorizationheader值
+X_HW_ID=""#X-HW-IDheader值
+X_HW_APPKEY=""#X-HW-APPKEYheader值
 
-HEADERS = {
-    "content-Type":  "application/json",
-    "csb-token": csb_token,
-    "X-HW-ID":       X_HW_ID,
-    "X-HW-APPKEY":   X_HW_APPKEY,
+HEADERS={
+"content-Type":"application/json",
+"csb-token":csb_token,
+"X-HW-ID":X_HW_ID,
+"X-HW-APPKEY":X_HW_APPKEY,
 }
-
 # ── 缓存配置 ──────────────────────────────────────────────
-CACHE_EXPIRE = 300  # 5 分钟
+CACHE_EXPIRE = 60  # 1 分钟
 
 _cache_lock = threading.Lock()
 _cache = {
@@ -71,12 +70,6 @@ def _parse_member_key(s):
     """将 Excel 成员单元格解析为 (key, mid)，key 与 API 返回的 user_id 格式匹配。
 
     API user_id 格式统一为：姓名拼音首字母 + 工号/ID
-      "Wang Tingkuo 84442956"  → ("w84442956",  "84442956")  英文拼音名+纯数字工号
-      "Zhang Zhi 84413741"     → ("z84413741",  "84413741")
-      "范诗卿 00934895"        → ("f00934895",  "00934895")  中文名+空格+纯数字工号
-      "李媚 wx1209009"         → ("lwx1209009", "wx1209009") 中文名+空格+字母数字ID
-                                  （API返回 l+wx1209009，l为李的拼音首字母）
-      "w00910350"              → ("w00910350",  "00910350")  纯ID（字母前缀）
       "张某某84434546"         → ("z84434546",  "84434546")  旧格式：中文名直连数字
     """
     parts = s.split()
@@ -324,9 +317,9 @@ def fetch_devenv_data():
         body={
             "vendor":   VENDOR,
             "region":   REGION,
-            "deType":   "",     # 不过滤类型，返回全部
+            "deType":   "Notebook",     # 不过滤类型，返回全部
             "pageNum":  1,
-            "pageSize": 500,
+            "pageSize": 10000,
         },
     )
     if data is None:
@@ -358,9 +351,9 @@ def fetch_train_data():
             "jobType":          "",
             "region":           REGION,
             "params": _b64({
-                "pageSize":  "500",
-                "pageIndex": "0",
-#                "status":    "8",
+                "pageSize": 10000,
+                "pageIndex": 1,
+                "status": "8",
             }),
         },
     )
@@ -386,7 +379,7 @@ def _fetch_inference_v1():
             "appid":     APPID,
             "infertype": "real-time",
             "params": _b64({
-                "pageSize":    500,
+                "pageSize":    10000,
                 "pageIndex":   1,
                 "filterParam": [{"key": "name", "value": ""}],
             }),
@@ -403,7 +396,7 @@ def _fetch_inference_v2():
             "infertype": "real-time",
             "vendor":    VENDOR,
             "params": _b64({
-                "pageSize":    500,
+                "pageSize":    10000,
                 "pageIndex":   1,
                 "filterParam": [{"key": "name", "value": ""}],
             }),

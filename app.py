@@ -353,7 +353,7 @@ def fetch_train_data():
             "params": _b64({
                 "pageSize": 10000,
                 "pageIndex": 1,
-                "status": "6,7,8,24",
+                "status": "",
             }),
         },
     )

@@ -343,10 +343,8 @@ def fetch_devenv_data():
 def fetch_train_data():
     """GET /csb/roma-aistudio/train/job/list"""
     print("获取训练作业数据...")
-    page_size = 500
-    page_index = 1
     all_jobs = []
-    while True:
+    for status in ("6", "7", "8", "24"):
         data = _get(
             f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
             params={
@@ -355,19 +353,15 @@ def fetch_train_data():
                 "jobType":          "",
                 "region":           REGION,
                 "params": _b64({
-                    "pageSize":  page_size,
-                    "pageIndex": page_index,
-                    "status":    "",
+                    "pageSize":  500,
+                    "pageIndex": 1,
+                    "status":    status,
                 }),
             },
         )
         if data is None:
             return None, None
-        jobs = data.get("trainJobs", [])
-        all_jobs.extend(jobs)
-        if len(jobs) < page_size:
-            break
-        page_index += 1
+        all_jobs.extend(data.get("trainJobs", []))
     return aggregate(
         all_jobs,
         gpu_field="workingGpuNum",

@@ -343,29 +343,32 @@ def fetch_devenv_data():
 def fetch_train_data():
     """GET /csb/roma-aistudio/train/job/list"""
     print("获取训练作业数据...")
-    data = _get(
-        f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
-        params={
-            "appid":            APPID,
-            "trainApiVersion":  "V2",
-            "jobType":          "",
-            "region":           REGION,
-            "params": _b64({
-                "pageSize": 10000,
-                "pageIndex": 1,
-                "status": "8",
-            }),
-        },
-    )
-    if data is None:
-        return None, None
+    all_jobs = []
+    for status in ("6", "7", "8", "24"):
+        data = _get(
+            f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
+            params={
+                "appid":            APPID,
+                "trainApiVersion":  "V2",
+                "jobType":          "",
+                "region":           REGION,
+                "params": _b64({
+                    "pageSize":  500,
+                    "pageIndex": 1,
+                    "status":    status,
+                }),
+            },
+        )
+        if data is None:
+            return None, None
+        all_jobs.extend(data.get("trainJobs", []))
     return aggregate(
-        data.get("trainJobs", []),
+        all_jobs,
         gpu_field="workingGpuNum",
         name_field="name",
         spec_field="specName",
         status_field="statusCode",
-        status_value={"6", "7", "8"},  # 运行中(8)、等待资源(6)、初始化(7)
+        status_value={"6", "7", "8", "24"},  # 运行中(8)、等待资源(6)、初始化(7)、排队中(24)
         duration_field="duration",
     )
 

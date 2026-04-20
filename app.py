@@ -343,24 +343,33 @@ def fetch_devenv_data():
 def fetch_train_data():
     """GET /csb/roma-aistudio/train/job/list"""
     print("获取训练作业数据...")
-    data = _get(
-        f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
-        params={
-            "appid":            APPID,
-            "trainApiVersion":  "V2",
-            "jobType":          "",
-            "region":           REGION,
-            "params": _b64({
-                "pageSize": 10000,
-                "pageIndex": 1,
-                "status": "",
-            }),
-        },
-    )
-    if data is None:
-        return None, None
+    page_size = 500
+    page_index = 1
+    all_jobs = []
+    while True:
+        data = _get(
+            f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
+            params={
+                "appid":            APPID,
+                "trainApiVersion":  "V2",
+                "jobType":          "",
+                "region":           REGION,
+                "params": _b64({
+                    "pageSize":  page_size,
+                    "pageIndex": page_index,
+                    "status":    "",
+                }),
+            },
+        )
+        if data is None:
+            return None, None
+        jobs = data.get("trainJobs", [])
+        all_jobs.extend(jobs)
+        if len(jobs) < page_size:
+            break
+        page_index += 1
     return aggregate(
-        data.get("trainJobs", []),
+        all_jobs,
         gpu_field="workingGpuNum",
         name_field="name",
         spec_field="specName",

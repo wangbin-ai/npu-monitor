@@ -15,14 +15,14 @@ from flask import Flask, render_template, jsonify, request
 app = Flask(__name__)
 
 #──鉴权配置──────────────────────────────────────────────
-ENDPOINT=""#替换为实际Endpoint
-APPID=""
+ENDPOINT="https://apigw-dgg-b0.huawei.com/api"#替换为实际Endpoint
+APPID="com.noah.pangu.rl"
 API_VERSION="v1"#demanager接口version参数
 VENDOR="HEC"
-REGION=""
-csb_token=""#Authorizationheader值
-X_HW_ID=""#X-HW-IDheader值
-X_HW_APPKEY=""#X-HW-APPKEYheader值
+REGION="cn-southwest-2"
+csb_token="95666dc2-8bd5-4b41-84e5-af5fb69722c6"#Authorizationheader值
+X_HW_ID="Noah_Decision_Making_Reasoning_Research"#X-HW-IDheader值
+X_HW_APPKEY="Kbj1tQEaYw8CptN82h+TtA=="#X-HW-APPKEYheader值
 
 HEADERS={
 "content-Type":"application/json",
@@ -31,7 +31,7 @@ HEADERS={
 "X-HW-APPKEY":X_HW_APPKEY,
 }
 # ── 缓存配置 ──────────────────────────────────────────────
-CACHE_EXPIRE = 60  # 1 分钟
+CACHE_EXPIRE = 60  # 5 分钟
 
 _cache_lock = threading.Lock()
 _cache = {
@@ -70,6 +70,12 @@ def _parse_member_key(s):
     """将 Excel 成员单元格解析为 (key, mid)，key 与 API 返回的 user_id 格式匹配。
 
     API user_id 格式统一为：姓名拼音首字母 + 工号/ID
+      "Wang Tingkuo 84442956"  → ("w84442956",  "84442956")  英文拼音名+纯数字工号
+      "Zhang Zhi 84413741"     → ("z84413741",  "84413741")
+      "范诗卿 00934895"        → ("f00934895",  "00934895")  中文名+空格+纯数字工号
+      "李媚 wx1209009"         → ("lwx1209009", "wx1209009") 中文名+空格+字母数字ID
+                                  （API返回 l+wx1209009，l为李的拼音首字母）
+      "w00910350"              → ("w00910350",  "00910350")  纯ID（字母前缀）
       "张某某84434546"         → ("z84434546",  "84434546")  旧格式：中文名直连数字
     """
     parts = s.split()
@@ -199,6 +205,7 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
         # 状态过滤（status_value 可为单值或 set/list）
         if status_field and status_value is not None:
             sv = item.get(status_field)
+            print(sv)
             if isinstance(status_value, (set, list, tuple)):
                 if sv not in status_value:
                     continue
@@ -344,31 +351,32 @@ def fetch_train_data():
     """GET /csb/roma-aistudio/train/job/list"""
     print("获取训练作业数据...")
     all_jobs = []
-    for status in ("6", "7", "8", "24"):
+    for status in ("26", "7", "8", "24"):
         data = _get(
             f"{ENDPOINT}/csb/roma-aistudio/train/job/list",
             params={
-                "appid":            APPID,
-                "trainApiVersion":  "V2",
-                "jobType":          "",
-                "region":           REGION,
+                "appid": APPID,
+                "trainApiVersion": "V2",
+                "jobType": "",
+                "region": REGION,
                 "params": _b64({
-                    "pageSize":  500,
+                    "pageSize": 500,
                     "pageIndex": 1,
-                    "status":    status,
+                    "status": status,
                 }),
             },
         )
         if data is None:
             return None, None
         all_jobs.extend(data.get("trainJobs", []))
+
     return aggregate(
         all_jobs,
         gpu_field="workingGpuNum",
         name_field="name",
         spec_field="specName",
         status_field="statusCode",
-        status_value={"6", "7", "8", "24"},  # 运行中(8)、等待资源(6)、初始化(7)、排队中(24)
+        status_value={"26", "7", "8", "24"},  # 运行中(8)、等待资源(6)、初始化(7)
         duration_field="duration",
     )
 

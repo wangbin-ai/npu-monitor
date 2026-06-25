@@ -1,0 +1,28 @@
+# NPU Monitor 花名册模板
+# 使用方式：cp roster.example.yaml roster.yaml，填入真实成员信息后启动
+#   python app.py --config config.yaml --roster roster.yaml
+#
+# 格式说明：
+#   leader:  组长全名（与 API 返回的 user_id 格式一致）
+#   quota:   该组分配的 NPU 卡数
+#   members: 成员列表，格式与 leader 相同
+#
+# 支持的姓名格式：
+#   "Wang Tingkuo 84442956"   英文拼音名 + 纯数字工号
+#   "范诗卿 00934895"          中文名 + 空格 + 工号
+#   "李媚 wx1209009"           中文名 + 空格 + 字母数字 ID
+#   "w00910350"               纯 ID（字母前缀）
+
+groups:
+  - leader: "Zhang San 84400001"
+    quota: 64
+    members:
+      - "Li Si 84400002"
+      - "王五 00400003"
+      - "w00400004"
+
+  - leader: "赵六 84400010"
+    quota: 32
+    members:
+      - "孙七 00400011"
+      - "Zhou Ba 84400012"

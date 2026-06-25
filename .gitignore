@@ -1,0 +1,4 @@
+config.yaml
+roster.yaml
+__pycache__/
+*.pyc

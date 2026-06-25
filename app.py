@@ -4,32 +4,142 @@ import re
 import time
 import traceback
 import threading
+import argparse
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import urllib3
+import yaml
 import requests
-import pandas as pd
 from pypinyin import lazy_pinyin
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from flask import Flask, render_template, jsonify, request
 
-app = Flask(__name__)
 
-#──鉴权配置──────────────────────────────────────────────
-ENDPOINT="https://apigw-dgg-b0.huawei.com/api"#替换为实际Endpoint
-APPID="com.noah.pangu.rl"
-API_VERSION="v1"#demanager接口version参数
-VENDOR="HEC"
-REGION="cn-southwest-2"
-csb_token="95666dc2-8bd5-4b41-84e5-af5fb69722c6"#Authorizationheader值
-X_HW_ID="Noah_Decision_Making_Reasoning_Research"#X-HW-IDheader值
-X_HW_APPKEY="Kbj1tQEaYw8CptN82h+TtA=="#X-HW-APPKEYheader值
+def _load_config():
+    """解析 --config / --roster 路径并校验文件存在，返回 (auth_cfg, roster_path)。"""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--config', default=None)
+    parser.add_argument('--roster', default=None)
+    args, _ = parser.parse_known_args()
 
-HEADERS={
-"content-Type":"application/json",
-"csb-token":csb_token,
-"X-HW-ID":X_HW_ID,
-"X-HW-APPKEY":X_HW_APPKEY,
+    if not args.config:
+        raise SystemExit(
+            "[ERROR] 请通过 --config <path> 指定鉴权配置文件\n"
+            "  例如：python app.py --config config.yaml --roster roster.yaml"
+        )
+    config_path = Path(args.config)
+    if not config_path.exists():
+        raise SystemExit(f"[ERROR] 鉴权配置文件不存在：{config_path.resolve()}")
+
+    if not args.roster:
+        raise SystemExit("[ERROR] 请通过 --roster <path> 指定花名册 YAML 文件")
+    roster_path = Path(args.roster)
+    if not roster_path.exists():
+        raise SystemExit(f"[ERROR] 花名册文件不存在：{roster_path.resolve()}")
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+    return cfg, roster_path
+
+
+_cfg, _roster_path = _load_config()
+
+# ── ROMA 平台配置（从 YAML roma: 节加载）─────────────────────
+_roma = _cfg['roma']
+ENDPOINT    = _roma['endpoint']
+APPID       = _roma['appid']
+API_VERSION = _roma['api_version']
+VENDOR      = _roma['vendor']
+REGION      = _roma['region']
+
+HEADERS = {
+    "content-Type": "application/json",
+    "csb-token":    _roma['csb_token'],
+    "X-HW-ID":      _roma['x_hw_id'],
+    "X-HW-APPKEY":  _roma['x_hw_appkey'],
 }
+
+# ── MA (ModelArts) 平台配置（可选）────────────────────────────
+_ma = _cfg.get('ma') or {}
+if _ma and all(_ma.get(k) for k in ('csb_endpoint', 'project_id', 'cloud_provider',
+                                     'resource_type', 'region', 'cloud_project_id')):
+    MA_BASE = (
+        f"{_ma['csb_endpoint']}/csb/projects/{_ma['project_id']}"
+        f"/vendors/{_ma['cloud_provider']}"
+        f"/resourcetypes/{_ma['resource_type']}"
+        f"/regions/{_ma['region']}"
+        f"/projects/{_ma['cloud_project_id']}"
+    )
+    MA_PROJECT = _ma['cloud_project_id']
+    MA_HEADERS = {
+        "Accept":        "application/json;charset=utf-8",
+        "Authorization": _ma.get('Authorization', ''),
+        "Content-Type":  "application/json",
+    }
+    print(f"[MA] 配置加载成功，base: {MA_BASE}")
+else:
+    MA_BASE = MA_PROJECT = MA_HEADERS = None
+    print("[MA] 未配置或配置不完整，跳过 MA 查询")
+
+
+def _fetch_ma_token():
+    """调用 IAM 接口获取 MA Authorization token，返回 token 字符串或 None。"""
+    token_cfg = _ma.get('token') or {}
+    endpoint   = token_cfg.get('endpoint', 'https://iam.his-op.huawei.com/iam/auth/token')
+    secret     = token_cfg.get('secret', '')
+    enterprise = token_cfg.get('enterprise', '')
+    account    = token_cfg.get('account', '')
+    project    = token_cfg.get('project', '')
+    if not (secret and enterprise and account and project):
+        return None
+    body = {
+        "data": {
+            "type": "jwt-token",
+            "attributes": {
+                "account":    account,
+                "secret":     secret,
+                "project":    project,
+                "enterprise": enterprise,
+            }
+        }
+    }
+    try:
+        r = requests.post(endpoint, json=body, timeout=15,
+                          verify=False, proxies={"http": None, "https": None})
+        if r.status_code in (200, 201):
+            resp = r.json()
+            token = (resp.get('access_token')
+                     or (resp.get('data') or {}).get('access_token'))
+            if token:
+                return token
+            print(f"[MA Token] 响应中未找到 access_token，返回体：{str(resp)[:200]}")
+        else:
+            print(f"[MA Token] 获取失败 {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        print(f"[MA Token] 请求异常: {e}")
+    return None
+
+
+def _ma_token_refresher():
+    """后台守护线程：启动时立即获取 token，之后每隔 23.5 小时刷新。"""
+    while True:
+        token = _fetch_ma_token()
+        if token and MA_HEADERS is not None:
+            MA_HEADERS['Authorization'] = token
+            print(f"[MA Token] 刷新成功（前20字符）：{token[:20]}…")
+        else:
+            print("[MA Token] 刷新失败，保留当前 token")
+        time.sleep(23.5 * 3600)
+
+
+_token_cfg = _ma.get('token') or {}
+if MA_BASE and all(_token_cfg.get(k) for k in ('secret', 'enterprise', 'account', 'project')):
+    _t = threading.Thread(target=_ma_token_refresher, daemon=True, name="ma-token-refresher")
+    _t.start()
+
+app = Flask(__name__)
 # ── 缓存配置 ──────────────────────────────────────────────
 CACHE_EXPIRE = 60  # 5 分钟
 
@@ -38,19 +148,12 @@ _cache = {
     "train":     {"user_data": {}, "spec_data": {}},
     "devenv":    {"user_data": {}, "spec_data": {}},
     "inference": {"user_data": {}, "spec_data": {}},
+    "ma_devenv": {"user_data": {}, "spec_data": {}},
+    "ma_train":  {"user_data": {}, "spec_data": {}},
     "last_update": 0,
 }
 
-# ── 花名册解析 ────────────────────────────────────────────
-_BASE_DIR = Path(__file__).parent
-_EXCEL_PATH = _BASE_DIR / '算法卡池先导用卡分配.xlsx'
-try:
-    df = pd.read_excel(_EXCEL_PATH, sheet_name='能力项用卡名单')
-    print(f"花名册加载成功：{_EXCEL_PATH}，共 {len(df)} 行")
-except FileNotFoundError:
-    raise SystemExit(f"[ERROR] 找不到花名册文件：{_EXCEL_PATH}")
-capability_columns = df.columns[1:-2].tolist()
-
+# ── 花名册 ────────────────────────────────────────────────
 usr_dict = {}       # key (lowercase) → leader
 usr_name_dict = {}  # key (lowercase) → 用户全名
 quota_dict = {}     # leader_name → 配额NPU卡数
@@ -114,38 +217,38 @@ def _store(key, name, leader):
         usr_dict[k] = leader
 
 
-for col in capability_columns:
-    raw_leader = df[col].iloc[0]
-    leader = str(raw_leader).strip() if pd.notna(raw_leader) else ''
-    if leader in ('nan', ''):
-        leader = col
-
-    # 读取配额（第三行 = iloc[1]，第二行已是组长名）
-    if len(df) > 1:
-        raw_quota = df[col].iloc[1]
+def _load_roster(path):
+    """从 YAML 花名册文件填充 usr_dict / usr_name_dict / quota_dict。"""
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    for group in data.get('groups', []):
+        leader = str(group.get('leader', '')).strip()
+        if not leader:
+            continue
         try:
-            q = int(float(str(raw_quota))) if pd.notna(raw_quota) else 0
+            q = int(float(group.get('quota', 0) or 0))
         except (ValueError, TypeError):
             q = 0
         if q > 0:
             quota_dict[leader] = q
 
-    # 将组长自身也注册到字典：组长可能自己也有任务，需归入本组统计
-    lkey, lmid = _parse_member_key(leader)
-    if lkey:
-        _store(lkey, leader, leader)
-    if lmid and lmid != lkey:
-        _store(lmid, leader, leader)
+        lkey, lmid = _parse_member_key(leader)
+        if lkey:
+            _store(lkey, leader, leader)
+        if lmid and lmid != lkey:
+            _store(lmid, leader, leader)
 
-    # 成员从第四行开始（iloc[2:]，跳过组长行和配额行）
-    for member in df[col].iloc[2:]:
-        if pd.notna(member) and str(member).strip() not in ('nan', 'sum', ''):
+        for member in group.get('members', []):
             s = str(member).strip()
+            if not s:
+                continue
             key, mid = _parse_member_key(s)
             _store(key, s, leader)
             if mid and mid != key:
                 _store(mid, s, leader)
 
+
+_load_roster(_roster_path)
 print(f"[花名册] 共加载 {len(usr_dict)} 个用户ID → 组长映射，"
       f"示例：{list(usr_dict.items())[:5]}")
 
@@ -204,8 +307,7 @@ def aggregate(items, *, gpu_field, name_field, spec_field,
     for item in items:
         # 状态过滤（status_value 可为单值或 set/list）
         if status_field and status_value is not None:
-            sv = item.get(status_field)
-            print(sv)
+            sv = item.get(status_field)  
             if isinstance(status_value, (set, list, tuple)):
                 if sv not in status_value:
                     continue
@@ -292,7 +394,8 @@ def _b64(obj):
 
 def _get(url, params, timeout=15):
     try:
-        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout,
+                        verify=False, proxies={"http": None, "https": None})
         if r.status_code == 200:
             return r.json()
         print(f"[GET {r.status_code}] {url}")
@@ -304,12 +407,48 @@ def _get(url, params, timeout=15):
 
 def _post(url, params, body, timeout=15):
     try:
-        r = requests.post(url, params=params, json=body, headers=HEADERS, timeout=timeout)
+        r = requests.post(url, params=params, json=body, headers=HEADERS, timeout=timeout,
+                         verify=False, proxies={"http": None, "https": None})
         if r.status_code == 200:
             return r.json()
         print(f"[POST {r.status_code}] {url}")
     except Exception as e:
         print(f"POST 请求异常 {url}: {e}")
+        traceback.print_exc()
+    return None
+
+
+def _ma_get(path, params=None, timeout=15):
+    """MA 平台 GET 请求：{MA_BASE}{path}，使用 MA 独立鉴权头。"""
+    if not MA_BASE:
+        return None
+    url = MA_BASE + path
+    try:
+        r = requests.get(url, params=params or {}, headers=MA_HEADERS, timeout=timeout,
+                         verify=False, proxies={"http": None, "https": None})
+        if r.status_code == 200:
+            return r.json()
+        print(f"[MA GET {r.status_code}] {url}")
+    except Exception as e:
+        print(f"MA GET 请求异常 {url}: {e}")
+        traceback.print_exc()
+    return None
+
+
+def _ma_post(path, json_body=None, timeout=15):
+    """MA 平台 POST 请求：{MA_BASE}{path}，使用 MA 独立鉴权头。"""
+    if not MA_BASE:
+        return None
+    url = MA_BASE + path
+    try:
+        r = requests.post(url, json=json_body or {}, headers=MA_HEADERS, timeout=timeout,
+                          verify=False, proxies={"http": None, "https": None})
+        if r.status_code == 200:
+            return r.json()
+        print(f"[MA POST {r.status_code}] {url}")
+        print(f"  {r.text[:200]}")
+    except Exception as e:
+        print(f"MA POST 请求异常 {url}: {e}")
         traceback.print_exc()
     return None
 
@@ -501,16 +640,145 @@ def fetch_inference_data():
     return merged
 
 
+# ── MA：Notebook 列表（ListAllNotebooks）────────────────────
+def fetch_ma_devenv_data():
+    """GET /v1/{project_id}/notebooks/all?status=RUNNING，自动翻页。
+
+    响应字段映射：
+      user_id      → 归属用户
+      name         → notebook 名称
+      flavor       → 规格（NPU 型号/规格串，count 不在 API 中故设为 0）
+      status       → 过滤 RUNNING
+      lease.create_at (ms) → 计算已运行小时数
+    """
+    if not MA_BASE:
+        return None, None
+    print("获取 MA Notebook 数据...")
+    all_items = []
+    offset, limit = 0, 50
+    base_params = {
+        "feature":     "NOTEBOOK",   # 仅查计费规格，排除免费 CodeLab
+        "status":      "RUNNING",
+        "limit":       limit,
+        "workspaceId": _ma.get("workspace_id", "0"),
+    }
+    while True:
+        data = _ma_get(
+            f"/v1/{MA_PROJECT}/notebooks/all",
+            params={**base_params, "offset": offset},
+        )
+        if data is None:
+            return None, None
+        items = data.get("data") or []
+        all_items.extend(items)
+        if not items or len(all_items) >= (data.get("total") or 0):
+            break
+        offset += limit
+
+    # 展开字段：user.name 格式为 "{首字母}{工号}"，去前缀得工号用于花名册匹配
+    for item in all_items:
+        item["_create_at"] = (item.get("lease") or {}).get("create_at")
+        m = re.search(r'\.npu\.(\d+)', item.get("flavor", ""))
+        item["_npu_num"] = int(m.group(1)) if m else 0
+        raw_name = (item.get("user") or {}).get("name", "")
+        item["_user_key"] = raw_name[1:] if raw_name else ""
+
+    return aggregate(
+        all_items,
+        user_field="_user_key",
+        gpu_field="_npu_num",
+        name_field="name",
+        spec_field="flavor",
+        status_field="status",
+        status_value="RUNNING",
+        duration_field="_create_at",
+    )
+
+
+# ── MA：训练实验列表（ListTrainingExperiments）───────────────
+def fetch_ma_train_data():
+    """POST /v2/{project_id}/training-job-searches，过滤 Running 状态，自动翻页。
+
+    响应字段映射：
+      metadata.user_name   → 归属用户（格式与 Notebook 一致，去首字母前缀）
+      metadata.name        → 作业名称
+      status.duration (ms) → 已运行时长
+      spec.resource        → NPU 卡数 = node_count × flavor_detail.flavor_info.npu.unit_num
+    """
+    if not MA_BASE:
+        return None, None
+    print("获取 MA 训练作业数据...")
+    all_items = []
+    offset, limit = 0, 50
+    body_base = {
+        "sort_by":     "create_time",
+        "order":       "desc",
+        "workspace_id": _ma.get("workspace_id", "0"),
+        "filters":     [{"key": "phase", "operator": "in", "value": ["Running", "Pending"]}],
+    }
+    while True:
+        data = _ma_post(
+            f"/v2/{MA_PROJECT}/training-job-searches",
+            json_body={**body_base, "offset": offset, "limit": limit},
+        )
+        if data is None:
+            return None, None
+        items = data.get("items") or []
+        all_items.extend(items)
+        if not items or len(all_items) >= (data.get("total") or 0):
+            break
+        offset += limit
+
+    now_ms = int(time.time() * 1000)
+    for item in all_items:
+        meta     = item.get("metadata") or {}
+        status   = item.get("status")   or {}
+        resource = (item.get("spec") or {}).get("resource") or {}
+
+        raw_name = meta.get("user_name", "")
+        item["_user_key"] = raw_name[1:] if raw_name else ""
+        item["_name"]     = meta.get("name", "")
+
+        pool_info    = resource.get("pool_info") or {}
+        npu_per_node = int(pool_info.get("accelerator_num") or 0)
+        node_count   = int(resource.get("node_count") or 1)
+        item["_npu_num"] = npu_per_node * node_count
+
+        # status.duration 单位毫秒，转为伪 create_at 供 aggregate 计算小时数
+        duration_ms      = int(status.get("duration") or 0)
+        item["_create_at"] = now_ms - duration_ms
+
+        sec = status.get("secondary_phase", "")
+        status_prefix = {"Creating": "[创建中] ", "Queuing": "[排队中] "}.get(sec, "")
+        item["_flavor"] = status_prefix + (pool_info.get("pool_resource_flavor")
+                                           or resource.get("flavor_id") or "")
+
+    return aggregate(
+        all_items,
+        user_field="_user_key",
+        gpu_field="_npu_num",
+        name_field="_name",
+        spec_field="_flavor",
+        status_field=None,
+        status_value=None,
+        duration_field="_create_at",
+    )
+
+
 # ── 缓存刷新 ──────────────────────────────────────────────
 def refresh_cache():
-    """并行拉取三类数据并更新缓存。调用方需自己持有 _cache_lock。"""
+    """并行拉取所有平台数据并更新缓存。调用方需自己持有 _cache_lock。"""
     fetchers = {
         "train":     fetch_train_data,
         "devenv":    fetch_devenv_data,
         "inference": fetch_inference_data,
     }
+    if MA_BASE:
+        fetchers["ma_devenv"] = fetch_ma_devenv_data
+        fetchers["ma_train"]  = fetch_ma_train_data
+
     updated = False
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=len(fetchers)) as pool:
         futures = {pool.submit(fn): key for key, fn in fetchers.items()}
         for future in as_completed(futures):
             key = futures[future]
@@ -529,20 +797,18 @@ def refresh_cache():
 
 
 def get_cached_data():
-    """返回三类缓存数据，必要时刷新。线程安全。"""
+    """返回所有平台缓存数据，必要时刷新。线程安全。"""
     with _cache_lock:
         age = time.time() - _cache["last_update"]
-        if age > CACHE_EXPIRE or not any(_cache[k]["user_data"] for k in ("train", "devenv", "inference")):
+        roma_keys = ("train", "devenv", "inference")
+        if age > CACHE_EXPIRE or not any(_cache[k]["user_data"] for k in roma_keys):
             print(f"缓存过期（{age:.0f}s），重新拉取...")
             refresh_cache()
         else:
             print(f"使用缓存（{age:.0f}s / {CACHE_EXPIRE}s）")
-        return {
-            "train":     dict(_cache["train"]),
-            "devenv":    dict(_cache["devenv"]),
-            "inference": dict(_cache["inference"]),
-            "last_update": _cache["last_update"],
-        }
+        return {k: dict(_cache[k]) for k in ("train", "devenv", "inference",
+                                              "ma_devenv", "ma_train")
+                } | {"last_update": _cache["last_update"]}
 
 
 # ── 路由 ─────────────────────────────────────────────────
@@ -573,14 +839,21 @@ def get_data():
         "train":     d["train"],
         "devenv":    d["devenv"],
         "inference": d["inference"],
+        "ma_devenv": d["ma_devenv"],
+        "ma_train":  d["ma_train"],
         "quotas":    quota_dict,
         "update_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(d["last_update"])),
     })
 
 
 if __name__ == '__main__':
-    import sys, socket
-    PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5063
+    import socket
+    _main_parser = argparse.ArgumentParser(parents=[argparse.ArgumentParser(add_help=False)])
+    _main_parser.add_argument('--config', required=True, help='鉴权配置 YAML 文件路径')
+    _main_parser.add_argument('--roster', required=True, help='花名册 YAML 文件路径')
+    _main_parser.add_argument('--port', type=int, default=5063, help='监听端口（默认 5063）')
+    _main_args = _main_parser.parse_args()
+    PORT = _main_args.port
 
     # 检测端口占用
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _chk:

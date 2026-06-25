@@ -1,0 +1,38 @@
+# NPU Monitor 鉴权配置模板
+# 使用方式：cp config.example.yaml config.yaml，填入真实值后启动
+#   python app.py --config config.yaml --roster roster.yaml
+#
+# 注意：config.yaml 含有敏感凭据，请勿提交到版本控制系统
+
+# ── ROMA 平台配置 ────────────────────────────────────────────
+roma:
+  endpoint:    "https://apigw-dgg-b0.huawei.com/api"  # 替换为实际 Endpoint
+  appid:       "com.noah.pangu.rl"
+  api_version: "v1"                                    # demanager 接口 version 参数
+  vendor:      "HEC"
+  region:      "cn-southwest-2"
+  csb_token:   ""            # Authorization header 值
+  x_hw_id:     ""            # X-HW-ID header 值
+  x_hw_appkey: ""            # X-HW-APPKEY header 值
+
+# ── MA (ModelArts) 平台配置（可选，不填则跳过 MA 查询）──────────
+# URL 模板：{csb_endpoint}/csb/projects/{project_id}/vendors/{cloud_provider}
+#           /resourcetypes/{resource_type}/regions/{region}/projects/{cloud_project_id}
+ma:
+  csb_endpoint:     "https://apigw-dgg-b0.huawei.com/api"
+  project_id:       ""        # CSB projectid（路径中的 projects/{project_id}）
+  cloud_provider:   "huaweicloud-china"
+  resource_type:    "modelarts"
+  region:           "cn-southwest-2"
+  cloud_project_id: ""        # MA 云项目 ID（路径末段 projects/{cloud_project_id}）
+  workspace_id:     ""        # Notebook/训练所属工作空间 ID
+  Authorization:    ""        # Authorization header 值（可留空，由 token: 配置自动获取）
+
+  # ── Token 自动刷新（每 23.5 小时刷新一次，留 30 分钟余量）──────
+  # 填写后启动时自动获取 token，无需手动维护 Authorization
+  token:
+    endpoint:   "https://iam.his-op.huawei.com/iam/auth/token"
+    account:    ""        # IAM 请求体 account 字段
+    project:    ""        # IAM 请求体 project 字段
+    secret:     ""        # IAM 密钥
+    enterprise: ""        # 企业 ID（32位）
